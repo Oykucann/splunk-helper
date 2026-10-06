@@ -1,0 +1,59 @@
+# Copy to environments/<name>.toml (gitignored) and fill in.
+name = "example-prod"
+
+# VIPs (keepalived / haproxy). Collection refuses these; always use node addresses.
+vips = ["10.0.1.100", "10.0.2.100"]
+
+[defaults]
+# ssh_user = "oyku"            # omit to use ~/.ssh/config
+run_as = "splunk"              # sudo -n -u <run_as>; set "" if ssh_user is already splunk
+splunk_home = "/data/splunk"
+ssh_options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
+timeout_seconds = 900
+btool = true
+# Extra app-name patterns collected as local/ + metadata/ only (ES, built-ins are default).
+# local_only_apps = ["Splunk_TA_aws", "TA-big-vendor-*"]
+
+[[servers]]
+name = "sh01"
+host = "10.0.1.10"
+role = "sh"
+site = "site1"
+
+[[servers]]
+name = "ds01"
+host = "10.0.1.11"
+role = "ds"
+site = "site1"
+
+[[servers]]
+name = "cm01"
+host = "10.0.1.12"
+role = "cm"
+site = "site1"
+
+[[servers]]
+name = "idx01"                 # one indexer per site: effective indexes.conf + [cachemanager]
+host = "10.0.1.40"
+role = "idx"
+site = "site1"
+
+[[servers]]
+name = "hf-pull01"             # dedicated DBX / scripted input HF
+host = "10.0.1.30"
+role = "hf"
+site = "site1"
+
+[[servers]]
+name = "hf01a"
+host = "10.0.1.21"
+role = "hf"
+site = "site1"
+ha_group = "site1-push"
+
+[[servers]]
+name = "hf01b"
+host = "10.0.1.22"
+role = "hf"
+site = "site1"
+ha_group = "site1-push"

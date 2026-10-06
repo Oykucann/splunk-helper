@@ -1,0 +1,147 @@
+# How a setting is expected to relate between servers. First matching rule wins.
+# conf / stanza / key are fnmatch patterns; "a|b" means either.
+#
+# expect:
+#   per_server  - legitimately unique per host (not compared)
+#   per_site    - same within a site; differs between sites today (independent sites).
+#                 Cross-site differences are listed as migration decisions.
+#   must_match  - must be identical everywhere it is compared; a difference is high severity
+#                 and usually blocks the multisite / SHC target.
+#   ignore      - noise, never compared
+# Anything not listed is "should_match" (medium severity when different).
+#
+# Fingerprinted secrets (<redacted:...>) are comparable only within one collection run.
+
+# --- instance facts (from the snapshot manifest) ------------------------------------
+[[rule]]
+conf = "_instance"
+stanza = "*"
+key = "splunk_version"
+expect = "must_match"
+note = "Cluster peers, SHC members and the CM must run compatible versions."
+
+[[rule]]
+conf = "_instance"
+stanza = "*"
+key = "splunk_secret_sha256"
+expect = "should_match"
+note = "SHC members must share splunk.secret; $7$ values copied between hosts only decrypt with the same secret."
+
+# --- server.conf --------------------------------------------------------------------
+[[rule]]
+conf = "server"
+stanza = "general"
+key = "serverName|guid|hostnameOption"
+expect = "per_server"
+
+[[rule]]
+conf = "server"
+stanza = "general"
+key = "site"
+expect = "per_site"
+
+[[rule]]
+conf = "server"
+stanza = "general|clustering|shclustering|indexer_discovery"
+key = "pass4SymmKey"
+expect = "must_match"
+note = "One multisite cluster / SHC needs one shared key."
+
+[[rule]]
+conf = "server"
+stanza = "clustering"
+key = "master_uri|manager_uri|mode|site_replication_factor|site_search_factor|available_sites|multisite"
+expect = "per_site"
+note = "Independent clusters today; one manager and one multisite policy in the target."
+
+[[rule]]
+conf = "server"
+stanza = "shclustering"
+key = "mgmt_uri|id"
+expect = "per_server"
+
+[[rule]]
+conf = "server"
+stanza = "sslConfig"
+key = "serverCert|privKeyPath|sslPassword|caCertFile"
+expect = "per_server"
+
+[[rule]]
+conf = "server"
+stanza = "sslConfig"
+key = "sslRootCAPath|sslVersions*|cipherSuite|ecdhCurves|sslVerifyServerCert|requireClientCert|sslCommonNameToCheck|sslAltNameToCheck|enableSplunkdSSL"
+expect = "must_match"
+note = "Sites must trust each other's certificates and agree on TLS to form one cluster."
+
+[[rule]]
+conf = "server"
+stanza = "kvstore"
+key = "storageEngine*|port|serverCert|sslPassword"
+expect = "must_match"
+note = "Mixed KV store engines/ports block an SHC."
+
+[[rule]]
+conf = "server"
+stanza = "license"
+key = "master_uri|manager_uri"
+expect = "per_site"
+note = "One license manager in the target."
+
+[[rule]]
+conf = "server"
+stanza = "lmpool:*|license*"
+key = "*"
+expect = "per_site"
+
+# --- web.conf -----------------------------------------------------------------------
+[[rule]]
+conf = "web"
+stanza = "settings"
+key = "serverCert|privKeyPath|sslPassword|mgmtHostPort|SSOMode|trustedIP|remoteUser*"
+expect = "per_server"
+
+[[rule]]
+conf = "web"
+stanza = "settings"
+key = "enableSplunkWebSSL|httpport|root_endpoint|sslVersions|cipherSuite|tools.sessions.timeout"
+expect = "must_match"
+note = "SHC members behind one load balancer must serve identically."
+
+# --- forwarding / topology ----------------------------------------------------------
+[[rule]]
+conf = "outputs"
+stanza = "tcpout*|indexer_discovery:*"
+key = "server|master_uri|manager_uri|defaultGroup"
+expect = "per_site"
+note = "Per-site indexer lists today; indexer discovery with site affinity in the target."
+
+[[rule]]
+conf = "deploymentclient"
+stanza = "*"
+key = "targetUri|clientName"
+expect = "per_site"
+
+[[rule]]
+conf = "distsearch"
+stanza = "distributedSearch"
+key = "servers"
+expect = "per_site"
+
+[[rule]]
+conf = "inputs"
+stanza = "default"
+key = "host"
+expect = "per_server"
+
+[[rule]]
+conf = "authentication"
+stanza = "*"
+key = "bindDNpassword|password"
+expect = "should_match"
+
+# --- noise --------------------------------------------------------------------------
+[[rule]]
+conf = "*"
+stanza = "*"
+key = "disabled_by_install|install_source_checksum|install_source_local_checksum"
+expect = "ignore"

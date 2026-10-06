@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# splunk-helper: collected data and real environment definitions never get committed
+snapshots/
+environments/*.toml
+!environments/example.toml
