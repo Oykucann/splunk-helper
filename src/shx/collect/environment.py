@@ -26,6 +26,18 @@ class Server:
     timeout_seconds: int = 900
     btool: bool = True
     local_only_apps: tuple[str, ...] = ()
+    # REST (search heads only, SPEC-002)
+    rest_token_env: str | None = None
+    rest_token_file: str | None = None
+    rest_port: int = 8089
+    rest_scheme: str = "https"
+    rest_verify_tls: bool = True
+    rest_ca_file: str | None = None
+    allow_privileged_token: bool = False
+
+    @property
+    def rest_enabled(self) -> bool:
+        return self.role == "sh" and bool(self.rest_token_env or self.rest_token_file)
 
     @property
     def order_key(self) -> tuple[int, str]:
@@ -56,7 +68,12 @@ class EnvironmentError_(ValueError):
 _SERVER_KEYS = {
     "name", "host", "role", "site", "ha_group", "ssh_user", "run_as", "splunk_home",
     "ssh_options", "timeout_seconds", "btool", "local_only_apps",
+    "rest_token_env", "rest_token_file", "rest_port", "rest_scheme", "rest_verify_tls",
+    "rest_ca_file", "allow_privileged_token",
 }
+# Per-server only: a token or privilege opt-in in [defaults] would silently apply to HFs.
+_SERVER_ONLY_KEYS = {"name", "host", "role", "site", "ha_group", "rest_token_env",
+                     "rest_token_file", "allow_privileged_token"}
 
 
 def load(path: str | Path) -> Environment:
@@ -65,7 +82,7 @@ def load(path: str | Path) -> Environment:
     if not name:
         raise EnvironmentError_("environment 'name' is required")
     defaults = data.get("defaults", {})
-    unknown = set(defaults) - (_SERVER_KEYS - {"name", "host", "role", "site", "ha_group"})
+    unknown = set(defaults) - (_SERVER_KEYS - _SERVER_ONLY_KEYS)
     if unknown:
         raise EnvironmentError_(f"unknown keys in [defaults]: {sorted(unknown)}")
 
@@ -81,6 +98,11 @@ def load(path: str | Path) -> Environment:
                 raise EnvironmentError_(f"server entry missing {key!r}: {raw}")
         if merged["role"] not in ROLES:
             raise EnvironmentError_(f"server {merged['name']!r}: role must be one of {ROLES}")
+        if merged["role"] != "sh" and (merged.get("rest_token_env") or merged.get("rest_token_file")):
+            raise EnvironmentError_(
+                f"server {merged['name']!r}: REST is only allowed on search heads (ADR-0001)")
+        if merged.get("rest_scheme", "https") not in ("https", "http"):
+            raise EnvironmentError_(f"server {merged['name']!r}: rest_scheme must be https or http")
         if merged["name"] in seen:
             raise EnvironmentError_(f"duplicate server name {merged['name']!r}")
         seen.add(merged["name"])

@@ -28,6 +28,9 @@ Remote collector: must run on Splunk's bundled Python (3.7+), stdlib only
 ## Layout
 
 - `src/shx/remote/collect_remote.py` — single file streamed to targets over SSH
-- `src/shx/collect/` — `shx-collect` driver (runs on the engineer's machine)
+- `src/shx/collect/` — `shx-collect` driver (runs on the engineer's machine); SH REST searches
+- `src/shx/transport/rest.py` — read-only REST client with request and SPL guards (SPEC-002)
+- `src/shx/conf/`, `src/shx/inventory/` — `shx-compare` (apps and effective config)
+- `src/shx/knowledge/` — data files (expected key relationships), no code
 - `environments/` — per-environment config (gitignored except the example)
 - `snapshots/` — collected data (gitignored, never committed)

@@ -18,7 +18,10 @@ import sys
 import tarfile
 from pathlib import Path
 
+from shx.collect import rest_collect
 from shx.collect.environment import EnvironmentError_, Server, load
+from shx.collect.searches import SEARCHES
+from shx.transport.rest import RestError
 
 REMOTE_SCRIPT = Path(__file__).resolve().parent.parent / "remote" / "collect_remote.py"
 GZIP_MAGIC = b"\x1f\x8b"
@@ -102,14 +105,35 @@ def collect_one(server: Server, run_dir: Path, salt: str) -> dict:
     return {"ok": True, "snapshot": final.name, **summary}
 
 
+def rest_check(server: Server, env) -> dict:
+    try:
+        ctx = rest_collect.check_context(rest_collect.client_for(server), server)
+    except (rest_collect.RestRefused, RestError, OSError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "username": ctx["username"], "roles": ctx["roles"],
+            "privileged_capabilities": ctx["privileged_capabilities"]}
+
+
+def rest_one(server: Server, env, run_dir: Path) -> dict:
+    try:
+        result = rest_collect.collect(server, env)
+    except (rest_collect.RestRefused, RestError, OSError, KeyError) as exc:
+        return {"ok": False, "error": str(exc)}
+    (run_dir / f"{server.name}.rest.json").write_text(json.dumps(result, indent=1, sort_keys=True))
+    return {"file": f"{server.name}.rest.json", **rest_collect.summary(result)}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="shx-collect", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("environment", help="path to environments/<name>.toml")
     parser.add_argument("--only", help="comma-separated server names")
     parser.add_argument("--check", action="store_true", help="connectivity/permission check only")
-    parser.add_argument("--dry-run", action="store_true", help="print ssh commands, do nothing")
+    parser.add_argument("--dry-run", action="store_true", help="print what would run, do nothing")
     parser.add_argument("--out", default="snapshots", help="snapshot root directory")
+    part = parser.add_mutually_exclusive_group()
+    part.add_argument("--no-rest", action="store_true", help="SSH collection only")
+    part.add_argument("--rest-only", action="store_true", help="search-head REST collection only")
     args = parser.parse_args(argv)
 
     try:
@@ -119,17 +143,24 @@ def main(argv: list[str] | None = None) -> int:
     except (EnvironmentError_, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    ssh_servers = [] if args.rest_only else servers
+    rest_servers = [] if args.no_rest else [s for s in servers if s.rest_enabled]
 
     if args.dry_run:
-        for s in servers:
+        for s in ssh_servers:
             print(f"# {s.name} ({s.role}{', ' + s.ha_group if s.ha_group else ''})")
             print(shlex.join(ssh_argv(s, check=args.check)))
+        for s in rest_servers:
+            print(f"# {s.name} REST {s.rest_scheme}://{s.host}:{s.rest_port} "
+                  f"searches: indexes, {', '.join(x.id for x in SEARCHES)}")
         return 0
 
     if args.check:
-        results = {s.name: run_check(s) for s in servers}
+        results = {s.name: {"ssh": run_check(s)} for s in ssh_servers}
+        for s in rest_servers:
+            results.setdefault(s.name, {})["rest"] = rest_check(s, env)
         print(json.dumps(results, indent=2, sort_keys=True))
-        return 0 if all(r["ok"] for r in results.values()) else 1
+        return 0 if all(r["ok"] for parts in results.values() for r in parts.values()) else 1
 
     run_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = Path(args.out) / env.name / run_id
@@ -139,18 +170,33 @@ def main(argv: list[str] | None = None) -> int:
         "environment": env.name,
         "run_id": run_id,
         "remote_script_sha256": hashlib.sha256(REMOTE_SCRIPT.read_bytes()).hexdigest(),
-        "servers": {},
+        "servers": {s.name: {"role": s.role, "site": s.site, "ha_group": s.ha_group, "host": s.host}
+                    for s in {*ssh_servers, *rest_servers}},
     }
-    for s in servers:  # strictly sequential (ADR-0001)
+
+    def save():
+        (run_dir / "run.json").write_text(json.dumps(run, indent=2, sort_keys=True))
+
+    outcomes = []
+    for s in ssh_servers:  # strictly sequential (ADR-0001)
         print(f"[{s.name}] collecting from {s.host} ...", file=sys.stderr, flush=True)
         result = collect_one(s, run_dir, salt)
-        run["servers"][s.name] = {"role": s.role, "site": s.site, "ha_group": s.ha_group,
-                                  "host": s.host, **result}
+        run["servers"][s.name].update(result)
+        outcomes.append(result["ok"])
         print(f"[{s.name}] {'ok' if result['ok'] else 'FAILED: ' + result['error']}",
               file=sys.stderr, flush=True)
-        (run_dir / "run.json").write_text(json.dumps(run, indent=2, sort_keys=True))
+        save()
+    for s in rest_servers:
+        print(f"[{s.name}] REST searches on {s.host} ...", file=sys.stderr, flush=True)
+        result = rest_one(s, env, run_dir)
+        run["servers"][s.name]["rest"] = result
+        outcomes.append(result["ok"])
+        status = "ok" if result["ok"] else "FAILED: " + (result.get("error") or ", ".join(result["failed"]))
+        print(f"[{s.name}] REST {status}", file=sys.stderr, flush=True)
+        save()
+    save()
     print(run_dir)
-    return 0 if all(r["ok"] for r in run["servers"].values()) else 1
+    return 0 if all(outcomes) else 1
 
 
 if __name__ == "__main__":

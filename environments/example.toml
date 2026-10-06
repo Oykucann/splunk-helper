@@ -19,6 +19,8 @@ name = "sh01"
 host = "10.0.1.10"
 role = "sh"
 site = "site1"
+rest_token_env = "SHX_TOKEN_SITE1"   # read-only role token, see docs/readonly-role.md
+# rest_ca_file = "~/.shx/ca.pem"      # or rest_verify_tls = false for self-signed (lab)
 
 [[servers]]
 name = "ds01"
