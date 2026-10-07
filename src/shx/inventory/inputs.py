@@ -51,7 +51,7 @@ def input_rows(ctx: RunContext) -> tuple[list[dict], list[str]]:
             source = next(iter(kv.values())).source
             check = checks.get(stanza)
             rows.append({
-                "server": snap.name, "role": snap.role, "site": snap.site or "",
+                "server": snap.name, "role": snap.role_label, "site": snap.site or "",
                 "ha_group": snap.ha_group or "", "app": app_of_source(source) or "system",
                 "layer": _layer(source), "kind": kind, "scheme": scheme(stanza) or "db_input",
                 "stanza": stanza, "enabled": not is_true(disabled.value if disabled else None),

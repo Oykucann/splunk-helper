@@ -7,6 +7,8 @@ into a multisite indexer cluster with a search head cluster.
 content may be the same or different between them.
 
 **Server**: One Splunk instance with a role: `sh`, `cm`, `ds`, `deployer`, `hf`, `idx`.
+A lab instance may carry extra roles (`also_roles`, e.g. SH that is also the CM); it is collected
+once, rules see every role, comparisons group it under its primary `role`.
 
 **HA Group**: Heavy forwarders that serve the same push inputs behind one VIP —
 a keepalived pair, or N HFs behind haproxy. All members must be configured identically.

@@ -42,7 +42,8 @@ def _index_time_stanzas(ctx: RunContext, server: str) -> dict[str, dict[str, str
 @rule("DATA-001", "Index-time settings missing on the heavy forwarders", "data-integrity")
 def index_time_not_on_hf(ctx: RunContext):
     hfs = [s for s in ctx.servers("hf") if ctx.has_btool(s.name, "props")]
-    others = [s for s in ctx.servers() if s.role in ("sh", "idx", "cm") and ctx.has_btool(s.name, "props")]
+    others = [s for s in ctx.servers() if {"sh", "idx", "cm"} & set(s.roles) and "hf" not in s.roles
+              and ctx.has_btool(s.name, "props")]
     if not hfs:
         raise InsufficientData("no HF props collected")
     if not others:
@@ -69,7 +70,7 @@ def index_time_not_on_hf(ctx: RunContext):
                 via_hf = sorted(seen_on_hf.get(stanza, set()) & {h.name for h in site_hfs})
                 yield Finding(
                     "DATA-001",
-                    f"Sourcetype {stanza}: index-time settings only on {other.role} {other.name}",
+                    f"Sourcetype {stanza}: index-time settings only on {other.role_label} {other.name}",
                     "high" if via_hf else "medium", "suspected", "data-integrity",
                     f"{site} / {other.name} / {stanza}",
                     servers=[other.name, *via_hf], sites=[site] if site else [],

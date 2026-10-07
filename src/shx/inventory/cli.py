@@ -108,7 +108,7 @@ def conf_section(diffs: list[ConfDifference]) -> list[str]:
 def markdown(snapshots, app_diffs: list[Difference], conf_diffs: list[ConfDifference]) -> str:
     lines = ["# Environment comparison", ""]
     lines += _table(["Server", "Role", "Site", "HA group", "Apps", "Splunk"],
-                    [[s.name, s.role, s.site or "", s.ha_group or "", str(len(s.apps)),
+                    [[s.name, s.role_label, s.site or "", s.ha_group or "", str(len(s.apps)),
                       s.manifest.get("splunk_version") or ""] for s in snapshots])
     lines += ["", "Severity: **high** = blocks the target or breaks failover; **decision** = "
               "expected to differ between independent sites today, must be unified for the "

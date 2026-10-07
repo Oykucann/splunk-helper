@@ -18,6 +18,16 @@ class ServerSnapshot:
     archive: Path
     # HA member that also runs pull inputs from these apps (environment `pull_apps`).
     pull_apps: tuple[str, ...] = ()
+    # Extra roles on the same instance; comparisons group by the primary `role`.
+    also_roles: tuple[str, ...] = ()
+
+    @property
+    def roles(self) -> tuple[str, ...]:
+        return (self.role, *self.also_roles)
+
+    @property
+    def role_label(self) -> str:
+        return "+".join(self.roles)
 
     @property
     def apps(self) -> list[dict]:
@@ -48,7 +58,8 @@ def load_run(run_dir: str | Path, env_path: str | Path | None = None) -> list[Se
     if env_path:
         from shx.collect.environment import load as load_env
         overrides = {s.name: {"role": s.role, "site": s.site, "ha_group": s.ha_group,
-                              "pull_apps": list(s.pull_apps)} for s in load_env(env_path).servers}
+                              "pull_apps": list(s.pull_apps), "also_roles": list(s.also_roles)}
+                     for s in load_env(env_path).servers}
     snapshots = []
     for name, info in sorted(run["servers"].items()):
         if not info.get("ok"):
@@ -59,5 +70,6 @@ def load_run(run_dir: str | Path, env_path: str | Path | None = None) -> list[Se
             name=name, role=info["role"], site=info.get("site"), ha_group=info.get("ha_group"),
             manifest=read_manifest(archive), archive=archive,
             pull_apps=tuple(info.get("pull_apps") or ()),
+            also_roles=tuple(info.get("also_roles") or ()),
         ))
     return snapshots

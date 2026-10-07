@@ -60,7 +60,7 @@ def inventory_rows(snapshots: list[ServerSnapshot]) -> list[dict]:
     for snap in snapshots:
         for app in snap.apps:
             rows.append({
-                "server": snap.name, "role": snap.role, "site": snap.site or "",
+                "server": snap.name, "role": snap.role_label, "site": snap.site or "",
                 "ha_group": snap.ha_group or "", "root": app["root"], "app": app["name"],
                 "version": app.get("version") or "", "manifest_version": app.get("manifest_version") or "",
                 "build": app.get("build") or "", "state": app.get("state") or "",

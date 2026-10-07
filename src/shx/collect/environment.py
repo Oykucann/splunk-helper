@@ -26,6 +26,8 @@ class Server:
     timeout_seconds: int = 900
     btool: bool = True
     local_only_apps: tuple[str, ...] = ()
+    # Extra roles on the same instance (e.g. a lab SH that is also the CM). `role` stays primary.
+    also_roles: tuple[str, ...] = ()
     # HA member that also runs pull inputs (DB Connect, scripted) from these apps only.
     pull_apps: tuple[str, ...] = ()
     # REST (search heads only, SPEC-002)
@@ -36,6 +38,10 @@ class Server:
     rest_verify_tls: bool = True
     rest_ca_file: str | None = None
     allow_privileged_token: bool = False
+
+    @property
+    def roles(self) -> tuple[str, ...]:
+        return (self.role, *self.also_roles)
 
     @property
     def rest_enabled(self) -> bool:
@@ -71,11 +77,11 @@ _SERVER_KEYS = {
     "name", "host", "role", "site", "ha_group", "ssh_user", "run_as", "splunk_home",
     "ssh_options", "timeout_seconds", "btool", "local_only_apps",
     "rest_token_env", "rest_token_file", "rest_port", "rest_scheme", "rest_verify_tls",
-    "rest_ca_file", "allow_privileged_token", "pull_apps",
+    "rest_ca_file", "allow_privileged_token", "pull_apps", "also_roles",
 }
 # Per-server only: a token or privilege opt-in in [defaults] would silently apply to HFs.
 _SERVER_ONLY_KEYS = {"name", "host", "role", "site", "ha_group", "rest_token_env",
-                     "rest_token_file", "allow_privileged_token", "pull_apps"}
+                     "rest_token_file", "allow_privileged_token", "pull_apps", "also_roles"}
 
 
 def load(path: str | Path) -> Environment:
@@ -108,9 +114,15 @@ def load(path: str | Path) -> Environment:
         if merged["name"] in seen:
             raise EnvironmentError_(f"duplicate server name {merged['name']!r}")
         seen.add(merged["name"])
+        extra = list(merged.get("also_roles", []))
+        if any(r not in ROLES for r in extra) or merged["role"] in extra or len(set(extra)) != len(extra):
+            raise EnvironmentError_(
+                f"server {merged['name']!r}: also_roles must be distinct roles from {ROLES}, other than role")
+        if "hf" in extra and (merged.get("rest_token_env") or merged.get("rest_token_file")):
+            raise EnvironmentError_(f"server {merged['name']!r}: REST is never allowed on an HF (ADR-0001)")
         if merged.get("pull_apps") and merged["role"] != "hf":
             raise EnvironmentError_(f"server {merged['name']!r}: pull_apps is only for heavy forwarders")
-        for key in ("ssh_options", "local_only_apps", "pull_apps"):
+        for key in ("ssh_options", "local_only_apps", "pull_apps", "also_roles"):
             if key in merged:
                 merged[key] = tuple(merged[key])
         if merged.get("run_as") == "":

@@ -29,7 +29,7 @@ class RunContext:
     # --- servers ------------------------------------------------------------------
 
     def servers(self, role: str | None = None) -> list[ServerSnapshot]:
-        return [s for s in self.snapshots if role is None or s.role == role]
+        return [s for s in self.snapshots if role is None or role in s.roles]
 
     @cached_property
     def ha_groups(self) -> dict[str, list[ServerSnapshot]]:

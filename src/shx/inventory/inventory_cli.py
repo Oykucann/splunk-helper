@@ -32,7 +32,7 @@ def markdown(ctx, rows, missing, instances, toml) -> str:
 
     lines = [f"# Inventory — {ctx.run.get('environment', '')} / {ctx.run.get('run_id', '')}", ""]
     lines += _table(["Server", "Role", "Site", "HA group", "Apps", "Push", "Pull", "Local", "Keepalived"],
-                    [[s.name, s.role, s.site or "", s.ha_group or "", str(len(s.apps)),
+                    [[s.name, s.role_label, s.site or "", s.ha_group or "", str(len(s.apps)),
                       str(counts[s.name]["push"]), str(counts[s.name]["pull"]), str(counts[s.name]["local"]),
                       "; ".join(vrrp.get(s.name, []))] for s in ctx.servers()])
     if missing:

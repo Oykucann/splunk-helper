@@ -148,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         for s in ssh_servers:
-            print(f"# {s.name} ({s.role}{', ' + s.ha_group if s.ha_group else ''})")
+            print(f"# {s.name} ({'+'.join(s.roles)}{', ' + s.ha_group if s.ha_group else ''})")
             print(shlex.join(ssh_argv(s, check=args.check)))
         for s in rest_servers:
             print(f"# {s.name} REST {s.rest_scheme}://{s.host}:{s.rest_port} "
@@ -171,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
         "run_id": run_id,
         "remote_script_sha256": hashlib.sha256(REMOTE_SCRIPT.read_bytes()).hexdigest(),
         "servers": {s.name: {"role": s.role, "site": s.site, "ha_group": s.ha_group, "host": s.host,
-                             "pull_apps": list(s.pull_apps)}
+                             "pull_apps": list(s.pull_apps), "also_roles": list(s.also_roles)}
                     for s in {*ssh_servers, *rest_servers}},
     }
 

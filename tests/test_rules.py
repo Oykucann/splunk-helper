@@ -124,7 +124,8 @@ def targets(results):
 def test_no_rule_errors(results):
     _, res = results
     assert [(r.rule, r.note) for r in res if r.status == "error"] == []
-    assert all(r.status == "ran" for r in res), [(r.rule, r.status, r.note) for r in res if r.status != "ran"]
+    not_ran = [(r.rule, r.status) for r in res if r.status != "ran"]
+    assert not_ran == [("TOPO-001", "not_applicable")]  # every server has a single role here
 
 
 def test_ha_rules(results):

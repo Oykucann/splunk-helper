@@ -41,6 +41,7 @@ raw conf files with app/layer/line, REST search rows, and name resolution of hos
 | SEC-001 | Cleartext secret (`<redacted:plain:…>`), HEC tokens excepted | raw files | high |
 | SEC-002 | Suspected credential in a script | manifest | medium (suspected) |
 | SEC-003 | `sslVerifyServerCert = false` set explicitly | btool | low |
+| TOPO-001 | Instance declared with `also_roles` (e.g. SH + CM in a lab) | environment | info |
 | RET-001 | No archive and: freeze events (proven) / ≥90% of size cap / time limit < 6y | `indexes`, `freeze_events` | high / high / medium |
 | RET-002 | ≥6y and no size limit (SmartStore) / no explicit limits (local) | `indexes` + raw | medium / low |
 | RET-003 | Limit the storage mode ignores | raw indexes.conf | medium |

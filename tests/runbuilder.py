@@ -41,7 +41,7 @@ def make_run(tmp: Path, servers: dict, rest: dict | None = None, env="test") -> 
                 tar.addfile(info, io.BytesIO(data))
         run["servers"][name] = {"ok": True, "snapshot": f"{name}.tar.gz", "role": spec["role"],
                                 "site": spec.get("site"), "ha_group": spec.get("ha"), "host": spec.get("host", name),
-                                "pull_apps": spec.get("pull_apps", [])}
+                                "pull_apps": spec.get("pull_apps", []), "also_roles": spec.get("also_roles", [])}
     for sh, searches in (rest or {}).items():
         payload = {"searches": {sid: {"ok": True, "results": rows} for sid, rows in searches.items()}}
         (tmp / f"{sh}.rest.json").write_text(json.dumps(payload))

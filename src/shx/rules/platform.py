@@ -13,7 +13,7 @@ def ds_drift(ctx: RunContext):
     ds_list = [s for s in ctx.servers("ds") if any(a["root"] == "deployment-apps" for a in s.apps)]
     if not ds_list:
         raise InsufficientData("no deployment server with deployment-apps collected")
-    clients = [s for s in ctx.servers() if s.role == "hf" and ctx.has_btool(s.name, "deploymentclient")]
+    clients = [s for s in ctx.servers("hf") if ctx.has_btool(s.name, "deploymentclient")]
     if not clients:
         raise NotApplicable("no collected HF is a deployment client")
     for client in clients:
@@ -146,3 +146,18 @@ def tls_verification_off(ctx: RunContext):
                     evidence=[Evidence(server=snap.name, path=v.source, stanza=stanza,
                                        key="sslVerifyServerCert", value=v.value)],
                     recommendation="Enable verification with a common CA before connecting the sites.")
+
+
+@rule("TOPO-001", "Several Splunk roles on one instance", "topology")
+def colocated_roles(ctx: RunContext):
+    combined = [s for s in ctx.servers() if s.also_roles]
+    if not combined:
+        raise NotApplicable("every server has a single role")
+    for s in combined:
+        yield Finding(
+            "TOPO-001", f"{s.name} runs {s.role_label} on one instance", "info", "proven", "topology",
+            f"{s.name} / {s.role_label}", servers=[s.name], sites=[s.site] if s.site else [],
+            evidence=[Evidence(server=s.name, detail=f"declared roles: {', '.join(s.roles)}")],
+            recommendation="Findings for this server cover all its roles; comparisons group it under "
+                           f"its primary role ({s.role}). Acceptable in a lab; the multisite target "
+                           "needs a dedicated cluster manager.")
