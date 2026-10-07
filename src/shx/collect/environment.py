@@ -26,6 +26,8 @@ class Server:
     timeout_seconds: int = 900
     btool: bool = True
     local_only_apps: tuple[str, ...] = ()
+    # HA member that also runs pull inputs (DB Connect, scripted) from these apps only.
+    pull_apps: tuple[str, ...] = ()
     # REST (search heads only, SPEC-002)
     rest_token_env: str | None = None
     rest_token_file: str | None = None
@@ -69,11 +71,11 @@ _SERVER_KEYS = {
     "name", "host", "role", "site", "ha_group", "ssh_user", "run_as", "splunk_home",
     "ssh_options", "timeout_seconds", "btool", "local_only_apps",
     "rest_token_env", "rest_token_file", "rest_port", "rest_scheme", "rest_verify_tls",
-    "rest_ca_file", "allow_privileged_token",
+    "rest_ca_file", "allow_privileged_token", "pull_apps",
 }
 # Per-server only: a token or privilege opt-in in [defaults] would silently apply to HFs.
 _SERVER_ONLY_KEYS = {"name", "host", "role", "site", "ha_group", "rest_token_env",
-                     "rest_token_file", "allow_privileged_token"}
+                     "rest_token_file", "allow_privileged_token", "pull_apps"}
 
 
 def load(path: str | Path) -> Environment:
@@ -106,7 +108,9 @@ def load(path: str | Path) -> Environment:
         if merged["name"] in seen:
             raise EnvironmentError_(f"duplicate server name {merged['name']!r}")
         seen.add(merged["name"])
-        for key in ("ssh_options", "local_only_apps"):
+        if merged.get("pull_apps") and merged["role"] != "hf":
+            raise EnvironmentError_(f"server {merged['name']!r}: pull_apps is only for heavy forwarders")
+        for key in ("ssh_options", "local_only_apps", "pull_apps"):
             if key in merged:
                 merged[key] = tuple(merged[key])
         if merged.get("run_as") == "":

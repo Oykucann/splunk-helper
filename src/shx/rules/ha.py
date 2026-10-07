@@ -6,13 +6,11 @@ import fnmatch
 from collections import defaultdict
 
 from shx.conf.compare import compare_all as compare_confs
+from shx.conf.inputs import app_of_source, is_pull_stanza, scheme
 from shx.inventory.apps import compare_ha_groups
 from shx.rules.base import Evidence, Finding, InsufficientData, NotApplicable, rule
 from shx.rules.context import RunContext, is_true
 
-PUSH_SCHEMES = {"udp", "tcp", "tcp-ssl", "splunktcp", "splunktcp-ssl", "http", "splunktcp-token"}
-NEUTRAL_SCHEMES = {"monitor", "batch", "fschange", "fifo", "WinEventLog", "perfmon", "admon",
-                   "WinRegMon", "WinHostMon", "WinNetMon", "WinPrintMon", "journald"}
 
 
 def _require_ha(ctx: RunContext):
@@ -51,42 +49,70 @@ def ha_app_drift(ctx: RunContext):
             recommendation="Deploy the same app version and content to every member from the DS.")
 
 
-def _scheme(stanza: str) -> str | None:
-    return stanza.split("://", 1)[0] if "://" in stanza else None
+def _enabled(kv) -> bool:
+    d = kv.get("disabled")
+    return not is_true(d.value if d else None)
+
+
+def _source(kv) -> str | None:
+    return next(iter(kv.values())).source if kv else None
+
+
+def _pull_inputs(ctx: RunContext, snap) -> dict[str, tuple[str, str | None]]:
+    """Enabled pull inputs on a server: key -> (kind, source file)."""
+    eff = ctx.effective(snap.name)
+    out = {}
+    for stanza, kv in eff.get("inputs", {}).items():
+        if is_pull_stanza(stanza) and _enabled(kv):
+            out[stanza] = (scheme(stanza), _source(kv))
+    for stanza, kv in eff.get("db_inputs", {}).items():
+        if stanza != "default" and _enabled(kv):
+            out[f"db_inputs://{stanza}"] = ("db_input", _source(kv))
+    return out
 
 
 @rule("HA-003", "Pull inputs on an HA group", "prod-risk")
 def pull_inputs_on_ha(ctx: RunContext):
     groups = _require_ha(ctx)
     for group, members in sorted(groups.items()):
-        for snap in members:
-            if not ctx.has_btool(snap.name, "inputs"):
+        per_member = {m.name: _pull_inputs(ctx, m) for m in members if ctx.has_btool(m.name, "inputs")}
+        running_on = {}
+        for name, inputs in per_member.items():
+            for key in inputs:
+                running_on.setdefault(key, []).append(name)
+        colocated = {}
+        for key, names in sorted(running_on.items()):
+            kind, source = per_member[names[0]][key]
+            if len(names) > 1:
+                yield Finding(
+                    "HA-003", f"{kind} input runs on {len(names)} members of {group}", "high",
+                    "proven", "prod-risk", f"{group} / {key}", servers=sorted(names),
+                    evidence=[Evidence(server=n, path=per_member[n][key][1], stanza=key) for n in sorted(names)],
+                    recommendation="A pull input on several nodes fetches the same data on each: duplicates. "
+                                   "Keep it on one node (or the dedicated pull HF).")
                 continue
-            eff = ctx.effective(snap.name)
-            for stanza, kv in sorted(eff["inputs"].items()):
-                scheme = _scheme(stanza)
-                if not scheme or scheme in PUSH_SCHEMES or scheme in NEUTRAL_SCHEMES:
-                    continue
-                if is_true(kv.get("disabled").value if kv.get("disabled") else None):
-                    continue
-                proven = scheme == "script"
-                yield Finding(
-                    "HA-003", f"{scheme} input on HA member {snap.name}", "high",
-                    "proven" if proven else "suspected", "prod-risk", f"{snap.name} / {stanza}",
-                    servers=[snap.name], sites=[snap.site] if snap.site else [],
-                    evidence=[Evidence(server=snap.name, path=kv[next(iter(kv))].source if kv else None,
-                                       stanza=stanza)],
-                    recommendation="Pull inputs (scripted, DB Connect, API) belong on the dedicated "
-                                   "pull HF. On both HA nodes they collect twice; on one they stop at failover.")
-            for stanza, kv in sorted(eff.get("db_inputs", {}).items()):
-                if stanza == "default" or is_true(kv.get("disabled").value if kv.get("disabled") else None):
-                    continue
-                yield Finding(
-                    "HA-003", f"DB Connect input on HA member {snap.name}", "high", "proven",
-                    "prod-risk", f"{snap.name} / db_inputs / {stanza}", servers=[snap.name],
-                    evidence=[Evidence(server=snap.name, stanza=stanza, detail="db_inputs.conf")],
-                    recommendation="Move DB Connect inputs to the pull HF (checkpoint migration is a "
-                                   "manual 🔴 step).")
+            snap = ctx.by_name[names[0]]
+            if snap.pull_apps and app_of_source(source or "") in snap.pull_apps:
+                colocated.setdefault(snap.name, []).append((key, source))
+                continue
+            yield Finding(
+                "HA-003", f"Unexpected {kind} input on HA member {snap.name}", "high",
+                "proven" if kind in ("script", "db_input") else "suspected", "prod-risk",
+                f"{snap.name} / {key}", servers=[snap.name], sites=[snap.site] if snap.site else [],
+                evidence=[Evidence(server=snap.name, path=source, stanza=key)],
+                recommendation="Not declared as a pull role for this node (pull_apps). Move it to the "
+                               "pull HF, or declare the app if co-locating it here is intended.")
+        for name, items in sorted(colocated.items()):
+            snap = ctx.by_name[name]
+            yield Finding(
+                "HA-003", f"{name} runs {len(items)} pull inputs alongside {group} (declared)", "low",
+                "proven", "prod-risk", f"{group} / {name} / colocated-pull", servers=[name],
+                sites=[snap.site] if snap.site else [],
+                evidence=[Evidence(server=name, path=src, stanza=key) for key, src in items],
+                recommendation="Intended: pull inputs use the node's own address, so VIP moves do not "
+                               "affect them. They have no failover if this node is down, and pause when "
+                               "it restarts (e.g. a restartSplunkd serverclass). Accept, or move them to "
+                               "a dedicated pull HF in the target design.")
 
 
 def _class_members(classes: dict, cls: str, hf_names: dict[str, set[str]]) -> set[str]:

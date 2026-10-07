@@ -59,3 +59,6 @@ host = "10.0.1.22"
 role = "hf"
 site = "site1"
 ha_group = "site1-push"
+# This keepalived member also runs DB Connect / scripted inputs on its own address.
+# Declared apps are excluded from HA comparison; their inputs are reported once, as low.
+# pull_apps = ["splunk_app_db_connect", "TA-poll"]

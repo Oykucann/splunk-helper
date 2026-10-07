@@ -123,9 +123,10 @@ def main(argv: list[str] | None = None) -> int:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("run_dir")
     parser.add_argument("--out", help="output directory (default: <run_dir>/reports)")
+    parser.add_argument("--env", help="environment file whose ha_group/pull_apps/site override run.json")
     args = parser.parse_args(argv)
 
-    snapshots = load_run(args.run_dir)
+    snapshots = load_run(args.run_dir, args.env)
     if not snapshots:
         print("error: no successful snapshots in run", file=sys.stderr)
         return 2

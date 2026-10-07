@@ -18,6 +18,7 @@ from pathlib import Path
 from shx.rules import data, ha, inputs, platform, retention  # noqa: F401  (register rules)
 from shx.rules.base import REGISTRY, SEVERITIES, Finding, RuleResult, run_rules
 from shx.rules.context import RunContext
+from shx.snapshot import load_run
 
 CATEGORY_ORDER = ["prod-risk", "data-integrity", "target-readiness", "retention", "drift",
                   "shc-migration", "dead-input", "broken-input", "capacity", "security"]
@@ -68,9 +69,10 @@ def main(argv: list[str] | None = None) -> int:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("run_dir")
     parser.add_argument("--out", help="output directory (default: <run_dir>/reports)")
+    parser.add_argument("--env", help="environment file whose ha_group/pull_apps/site override run.json")
     args = parser.parse_args(argv)
 
-    ctx = RunContext(args.run_dir)
+    ctx = RunContext(args.run_dir, load_run(args.run_dir, args.env))
     if not ctx.snapshots and not ctx.rest:
         print("error: nothing collected in this run", file=sys.stderr)
         return 2

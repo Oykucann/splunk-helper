@@ -116,13 +116,18 @@ def compare_members(level: str, scope: str, members: dict[str, dict], roots,
 
 def compare_ha_groups(snapshots: list[ServerSnapshot]) -> list[Difference]:
     groups = defaultdict(dict)
+    pull_apps = defaultdict(set)
     for s in snapshots:
         if s.ha_group:
             groups[s.ha_group][s.name] = _states(s, INSTALLED_ROOTS)
+            pull_apps[s.ha_group] |= set(s.pull_apps)
     diffs = []
     for group, members in sorted(groups.items()):
         if len(members) > 1:
-            diffs += compare_members("ha_group", group, members, INSTALLED_ROOTS, include_presence=True)
+            # Apps declared as a member's pull role are expected to exist on that member only.
+            diffs += [d for d in compare_members("ha_group", group, members, INSTALLED_ROOTS,
+                                                 include_presence=True)
+                      if d.app not in pull_apps[group]]
     return diffs
 
 

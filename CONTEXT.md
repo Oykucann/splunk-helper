@@ -13,6 +13,9 @@ a keepalived pair, or N HFs behind haproxy. All members must be configured ident
 
 **Pull HF**: A dedicated heavy forwarder running pull inputs. Not part of an HA group.
 
+**Co-located pull role**: An HA-group member that also runs pull inputs on its own address
+(not the VIP), declared with `pull_apps`. Unaffected by VIP moves; no failover if the node is down.
+
 **Push Input**: Data sent to Splunk: syslog (udp/tcp), HEC, splunktcp (UF → HF).
 Must be identical on every member of an HA group.
 

@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from shx.conf.btool import EffectiveConf, Setting, parse
+from shx.conf.inputs import PULL_CONFS, app_of_source
 from shx.snapshot import ServerSnapshot, read_members
 
 SYSTEM_CONFS = ("server", "web", "limits", "authentication", "authorize", "distsearch",
@@ -99,6 +100,23 @@ def effective_confs(snap: ServerSnapshot) -> dict[str, EffectiveConf]:
     return confs
 
 
+def without_pull(confs: dict[str, EffectiveConf], pull_apps: set[str]) -> dict[str, EffectiveConf]:
+    """Drop configuration owned by declared pull apps (an HA member's intended extra role)."""
+    if not pull_apps:
+        return confs
+    out = {}
+    for conf, stanzas in confs.items():
+        if conf in PULL_CONFS:
+            continue
+        kept = {}
+        for stanza, kv in stanzas.items():
+            rest = {k: v for k, v in kv.items() if app_of_source(v.source) not in pull_apps}
+            if rest or not kv:
+                kept[stanza] = rest
+        out[conf] = kept
+    return out
+
+
 def compare_members(level: str, scope: str, members: dict[str, list[dict[str, EffectiveConf]]],
                     confs, expectations: Expectations) -> list[ConfDifference]:
     """members: label (server or site) -> effective confs of each server in it."""
@@ -132,9 +150,13 @@ def compare_all(snapshots: list[ServerSnapshot], expectations: Expectations | No
     diffs: list[ConfDifference] = []
 
     ha = defaultdict(dict)
+    pull_apps = defaultdict(set)
     for s in snapshots:
         if s.ha_group:
-            ha[s.ha_group][s.name] = [eff[s.name]]
+            pull_apps[s.ha_group] |= set(s.pull_apps)
+    for s in snapshots:
+        if s.ha_group:
+            ha[s.ha_group][s.name] = [without_pull(eff[s.name], pull_apps[s.ha_group])]
     for group, members in sorted(ha.items()):
         if len(members) > 1:
             all_confs = sorted({c for m in members.values() for c in m[0]})

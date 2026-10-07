@@ -170,7 +170,8 @@ def main(argv: list[str] | None = None) -> int:
         "environment": env.name,
         "run_id": run_id,
         "remote_script_sha256": hashlib.sha256(REMOTE_SCRIPT.read_bytes()).hexdigest(),
-        "servers": {s.name: {"role": s.role, "site": s.site, "ha_group": s.ha_group, "host": s.host}
+        "servers": {s.name: {"role": s.role, "site": s.site, "ha_group": s.ha_group, "host": s.host,
+                             "pull_apps": list(s.pull_apps)}
                     for s in {*ssh_servers, *rest_servers}},
     }
 

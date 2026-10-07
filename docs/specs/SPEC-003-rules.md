@@ -20,9 +20,9 @@ raw conf files with app/layer/line, REST search rows, and name resolution of hos
 
 | Rule | Checks | Evidence | Severity |
 |---|---|---|---|
-| HA-001 | Effective config differs inside an HA group | btool | high |
+| HA-001 | Effective config differs inside an HA group (settings from declared `pull_apps` excluded) | btool | high |
 | HA-002 | App presence/version/content/local differs inside an HA group | manifest apps | high |
-| HA-003 | Pull input (scripted, DB Connect, unknown modular) enabled on an HA member | btool inputs, db_inputs | high |
+| HA-003 | Pull input (scripted, DB Connect, unknown modular) on an HA member: on 2+ members (duplicates) or undeclared → high; from apps declared in `pull_apps` → one low finding per node | btool inputs, db_inputs | high / low |
 | HA-004 | DS serverclass with `restartSplunkd` matching 2+ members of one HA group | DS btool serverclass | high |
 | FWD-001 | `tcpout` group with static `server` list, no indexer discovery | btool outputs | medium |
 | FWD-002 | `useACK` off | btool outputs | medium |
