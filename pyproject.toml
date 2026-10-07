@@ -15,6 +15,7 @@ dev = ["pytest>=7"]
 [project.scripts]
 shx-collect = "shx.collect.cli:main"
 shx-compare = "shx.inventory.cli:main"
+shx-findings = "shx.rules.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

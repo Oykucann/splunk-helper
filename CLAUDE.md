@@ -32,5 +32,7 @@ Remote collector: must run on Splunk's bundled Python (3.7+), stdlib only
 - `src/shx/transport/rest.py` — read-only REST client with request and SPL guards (SPEC-002)
 - `src/shx/conf/`, `src/shx/inventory/` — `shx-compare` (apps and effective config)
 - `src/shx/knowledge/` — data files (expected key relationships), no code
+- `src/shx/rules/` — `shx-findings`: one module per rule family, registered with `@rule` (SPEC-003)
+- `tests/runbuilder.py` — build synthetic runs; every rule needs a positive and a negative case
 - `environments/` — per-environment config (gitignored except the example)
 - `snapshots/` — collected data (gitignored, never committed)

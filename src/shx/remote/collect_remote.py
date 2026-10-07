@@ -118,11 +118,14 @@ class Redactor(object):
         self.count = 0
 
     def mask(self, value):
+        """<redacted:enc:fp> for Splunk-encrypted values, <redacted:plain:fp> for cleartext.
+        The enc/plain marker lets rules flag cleartext secrets without seeing them."""
         self.count += 1
+        kind = "enc" if ENCRYPTED_RE.match(value.strip()) else "plain"
         if not self.salt:
-            return "<redacted>"
+            return "<redacted:%s>" % kind
         digest = hmac.new(self.salt, value.encode("utf-8", "replace"), hashlib.sha256)
-        return "<redacted:%s>" % digest.hexdigest()[:12]
+        return "<redacted:%s:%s>" % (kind, digest.hexdigest()[:12])
 
     def _encrypted(self, text):
         return ENCRYPTED_RE.sub(lambda m: self.mask(m.group(0)), text)

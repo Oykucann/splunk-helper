@@ -272,3 +272,10 @@ def test_minimal_install_without_smartstore(tmp_path):
     assert "etc/apps/org_all_indexes/local/indexes.conf" in tar.getnames()
     assert manifest["errors"] == []
     assert [a["name"] for a in manifest["apps"]] == ["org_all_indexes"]
+
+
+def test_redaction_marks_encrypted_vs_cleartext():
+    r = Redactor("x")
+    out = r.conf_text(f"[a]\npassword = {ENC}\n[b]\npassword = hunter22\n")
+    assert "password = <redacted:enc:" in out and "password = <redacted:plain:" in out
+    assert "hunter22" not in out
