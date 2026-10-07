@@ -11,6 +11,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import os
 import secrets
 import shlex
 import subprocess
@@ -42,9 +43,21 @@ def remote_command(server: Server, check: bool) -> str:
     return cmd
 
 
+def ssh_auth_options(server: Server) -> list[str]:
+    if server.ssh_auth == "password":
+        # ssh asks on the terminal (/dev/tty), so stdin stays free for the streamed script.
+        return ["-o", "PreferredAuthentications=password,keyboard-interactive",
+                "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1"]
+    opts = [] if "BatchMode=yes" in server.ssh_options else ["-o", "BatchMode=yes"]
+    if server.ssh_key:
+        opts += ["-i", os.path.expanduser(server.ssh_key), "-o", "IdentitiesOnly=yes"]
+    return opts
+
+
 def ssh_argv(server: Server, check: bool) -> list[str]:
     target = f"{server.ssh_user}@{server.host}" if server.ssh_user else server.host
-    return ["ssh", "-T", *server.ssh_options, target, remote_command(server, check)]
+    return ["ssh", "-T", *ssh_auth_options(server), *server.ssh_options, target,
+            remote_command(server, check)]
 
 
 def script_payload(salt: str) -> bytes:

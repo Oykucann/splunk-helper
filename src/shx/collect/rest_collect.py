@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import getpass
 import os
 from pathlib import Path
 
@@ -24,9 +25,28 @@ def load_token(server: Server) -> str:
     return path.read_text().strip()
 
 
+_PASSWORDS: dict[tuple[str, str], str] = {}  # in memory for this process only
+
+
+def load_password(server: Server, prompt=getpass.getpass) -> str:
+    key = (server.host, server.rest_username)
+    if key not in _PASSWORDS:
+        if server.rest_password_env:
+            value = os.environ.get(server.rest_password_env, "")
+            if not value:
+                raise RestRefused(f"environment variable {server.rest_password_env} is empty")
+        else:
+            value = prompt(f"Splunk password for {server.rest_username}@{server.host}: ")
+        _PASSWORDS[key] = value
+    return _PASSWORDS[key]
+
+
 def client_for(server: Server) -> RestClient:
-    return RestClient(base_url=f"{server.rest_scheme}://{server.host}:{server.rest_port}",
-                      token=load_token(server), verify_tls=server.rest_verify_tls,
+    base = f"{server.rest_scheme}://{server.host}:{server.rest_port}"
+    if server.rest_auth == "password":
+        return RestClient(base_url=base, token=load_password(server), username=server.rest_username,
+                          verify_tls=server.rest_verify_tls, ca_file=server.rest_ca_file)
+    return RestClient(base_url=base, token=load_token(server), verify_tls=server.rest_verify_tls,
                       ca_file=server.rest_ca_file)
 
 

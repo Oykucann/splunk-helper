@@ -8,7 +8,10 @@ vips = ["10.0.1.100", "10.0.2.100"]
 # ssh_user = "oyku"            # omit to use ~/.ssh/config
 run_as = "splunk"              # sudo -n -u <run_as>; set "" if ssh_user is already splunk
 splunk_home = "/data/splunk"
-ssh_options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
+# SSH login: "key" (default; agent/~/.ssh/config, or ssh_key) or "password" (ssh prompts per server).
+# ssh_auth = "password"
+# ssh_key = "~/.ssh/lab.pem"
+ssh_options = ["-o", "ConnectTimeout=10"]
 timeout_seconds = 900
 btool = true
 # Extra app-name patterns collected as local/ + metadata/ only (ES, built-ins are default).
@@ -20,6 +23,10 @@ host = "10.0.1.10"
 role = "sh"
 site = "site1"
 rest_token_env = "SHX_TOKEN_SITE1"   # read-only role token, see docs/readonly-role.md
+# Or username/password instead of a token (password from env var, else prompted; never stored):
+# rest_auth = "password"
+# rest_username = "shx_ro_user"
+# rest_password_env = "SHX_PW_SITE1"
 # also_roles = ["cm"]                 # lab only: this SH is also the cluster manager
 # rest_ca_file = "~/.shx/ca.pem"      # or rest_verify_tls = false for self-signed (lab)
 

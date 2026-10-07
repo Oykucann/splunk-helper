@@ -9,8 +9,10 @@ size/age/freeze activity, and knowledge-object usage. All from the search head, 
 ## Safety (extends ADR-0001)
 
 - REST targets only servers with role `sh`. Configuring `rest_*` on another role is an error.
-- Token auth only; the token comes from an environment variable or a file, never from the
-  environment TOML itself.
+- Auth is a bearer token (from an environment variable or a file) or, with
+  `rest_auth = "password"`, basic auth for `rest_username` with the password from an environment
+  variable or a terminal prompt. Credentials are never written to the TOML, run files or logs.
+  The capability check below applies to either.
 - The client allows `GET` on `/services/...` and `/servicesNS/...`, and `POST` only to
   `/services/search/jobs` with `exec_mode=oneshot`. Anything else raises before sending.
 - Every SPL string passes a guard before sending: no backtick macros, and no command from

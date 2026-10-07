@@ -37,10 +37,11 @@ Details: [ADR-0001](docs/adr/ADR-0001-read-only-collection.md),
 ## Requirements
 
 - **Python 3.11+** on the machine running the tool. No extra packages (standard library only).
-- Key-based, passwordless SSH to the targets and passwordless `sudo -n -u splunk`
-  (or connecting directly as the `splunk` user).
-- For REST: a read-only role and token on each search head, see
-  [docs/readonly-role.md](docs/readonly-role.md).
+- SSH to the targets with a key (default) or a password (`ssh_auth = "password"`, ssh prompts
+  per server), and passwordless `sudo -n -u splunk` (or connect directly as the `splunk` user).
+- For REST: a user with a read-only role on each search head, with a token (default) or a
+  password (`rest_auth = "password"`), see [docs/readonly-role.md](docs/readonly-role.md).
+  Without a CA file, set `rest_verify_tls = false` (lab only).
 
 ## Quick start
 
@@ -87,12 +88,13 @@ After `pip install -e .` the same commands are available as `shx-collect`, `shx-
 |---|---|
 | `name` | Environment name; snapshots go to `snapshots/<name>/<run_id>/` |
 | `vips` | keepalived/haproxy VIPs; never connected to |
-| `[defaults]` | `ssh_user`, `run_as`, `splunk_home` (default `/data/splunk`), `ssh_options`, `timeout_seconds`, `btool`, `local_only_apps`, `rest_port`, `rest_scheme`, `rest_verify_tls`, `rest_ca_file` |
+| `[defaults]` | `ssh_user`, `ssh_auth` (`key`/`password`), `ssh_key`, `run_as`, `splunk_home` (default `/data/splunk`), `ssh_options`, `timeout_seconds`, `btool`, `local_only_apps`, `rest_auth` (`token`/`password`), `rest_port`, `rest_scheme`, `rest_verify_tls`, `rest_ca_file` |
 | `[[servers]]` `name`, `host`, `role`, `site` | Role: `sh`, `cm`, `ds`, `deployer`, `idx`, `hf` |
 | `ha_group` | HFs serving the same push inputs behind one VIP (a keepalived pair, an haproxy pool) |
 | `pull_apps` | An HA member that also runs DB Connect / scripted inputs on its own address: the apps owning them |
 | `also_roles` | Extra roles on the same instance (e.g. SH + CM in a lab). Collected once; reported as an info finding |
 | `rest_token_env` / `rest_token_file` | `sh` only; the token lives in an environment variable or a separate file |
+| `rest_username` / `rest_password_env` | `sh` only, with `rest_auth = "password"`; the password comes from the variable or is prompted once per run, never written |
 | `allow_privileged_token` | Lab only: accept a token with write capabilities |
 
 Example: [environments/example.toml](environments/example.toml).

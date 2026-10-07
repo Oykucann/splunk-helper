@@ -30,7 +30,13 @@ class Server:
     also_roles: tuple[str, ...] = ()
     # HA member that also runs pull inputs (DB Connect, scripted) from these apps only.
     pull_apps: tuple[str, ...] = ()
-    # REST (search heads only, SPEC-002)
+    # SSH login: "key" (agent / ~/.ssh/config, or ssh_key) or "password" (prompted by ssh)
+    ssh_auth: str = "key"
+    ssh_key: str | None = None
+    # REST (search heads only, SPEC-002): "token" or "password" (basic auth, never stored)
+    rest_auth: str = "token"
+    rest_username: str | None = None
+    rest_password_env: str | None = None
     rest_token_env: str | None = None
     rest_token_file: str | None = None
     rest_port: int = 8089
@@ -45,7 +51,11 @@ class Server:
 
     @property
     def rest_enabled(self) -> bool:
-        return self.role == "sh" and bool(self.rest_token_env or self.rest_token_file)
+        if self.role != "sh":
+            return False
+        if self.rest_auth == "password":
+            return bool(self.rest_username)
+        return bool(self.rest_token_env or self.rest_token_file)
 
     @property
     def order_key(self) -> tuple[int, str]:
@@ -78,10 +88,12 @@ _SERVER_KEYS = {
     "ssh_options", "timeout_seconds", "btool", "local_only_apps",
     "rest_token_env", "rest_token_file", "rest_port", "rest_scheme", "rest_verify_tls",
     "rest_ca_file", "allow_privileged_token", "pull_apps", "also_roles",
+    "ssh_auth", "ssh_key", "rest_auth", "rest_username", "rest_password_env",
 }
 # Per-server only: a token or privilege opt-in in [defaults] would silently apply to HFs.
 _SERVER_ONLY_KEYS = {"name", "host", "role", "site", "ha_group", "rest_token_env",
-                     "rest_token_file", "allow_privileged_token", "pull_apps", "also_roles"}
+                     "rest_token_file", "allow_privileged_token", "pull_apps", "also_roles",
+                     "rest_username", "rest_password_env"}
 
 
 def load(path: str | Path) -> Environment:
@@ -106,9 +118,19 @@ def load(path: str | Path) -> Environment:
                 raise EnvironmentError_(f"server entry missing {key!r}: {raw}")
         if merged["role"] not in ROLES:
             raise EnvironmentError_(f"server {merged['name']!r}: role must be one of {ROLES}")
-        if merged["role"] != "sh" and (merged.get("rest_token_env") or merged.get("rest_token_file")):
+        if merged["role"] != "sh" and any(merged.get(k) for k in (
+                "rest_token_env", "rest_token_file", "rest_username", "rest_password_env")):
             raise EnvironmentError_(
                 f"server {merged['name']!r}: REST is only allowed on search heads (ADR-0001)")
+        if merged.get("ssh_auth", "key") not in ("key", "password"):
+            raise EnvironmentError_(f"server {merged['name']!r}: ssh_auth must be key or password")
+        if merged.get("ssh_auth") == "password" and "BatchMode=yes" in merged.get("ssh_options", []):
+            raise EnvironmentError_(
+                f"server {merged['name']!r}: remove BatchMode=yes from ssh_options to use ssh_auth = password")
+        if merged.get("rest_auth", "token") not in ("token", "password"):
+            raise EnvironmentError_(f"server {merged['name']!r}: rest_auth must be token or password")
+        if merged.get("rest_auth") == "password" and merged["role"] == "sh" and not merged.get("rest_username"):
+            raise EnvironmentError_(f"server {merged['name']!r}: rest_auth = password needs rest_username")
         if merged.get("rest_scheme", "https") not in ("https", "http"):
             raise EnvironmentError_(f"server {merged['name']!r}: rest_scheme must be https or http")
         if merged["name"] in seen:

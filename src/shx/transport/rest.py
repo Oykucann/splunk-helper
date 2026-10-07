@@ -5,6 +5,7 @@ Only GET on /services and /servicesNS, and POST of oneshot searches that pass th
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import ssl
@@ -102,11 +103,21 @@ def mask_text(text: str) -> str:
 @dataclass
 class RestClient:
     base_url: str               # e.g. https://10.0.1.10:8089
-    token: str
+    token: str = ""             # bearer token, or the password when `username` is set
     verify_tls: bool = True
     ca_file: str | None = None
     timeout: float = 300.0
     opener: object = None       # injectable for tests
+    username: str | None = None  # set -> HTTP basic auth with `token` as the password
+
+    def _authorization(self) -> str:
+        if self.username:
+            raw = f"{self.username}:{self.token}".encode()
+            return "Basic " + base64.b64encode(raw).decode()
+        return f"Bearer {self.token}"
+
+    def __repr__(self) -> str:  # never print credentials
+        return f"RestClient({self.base_url!r}, user={self.username!r})"
 
     def _context(self):
         if not self.base_url.startswith("https"):
@@ -125,7 +136,7 @@ class RestClient:
         url = f"{self.base_url.rstrip('/')}{path}?{urllib.parse.urlencode(query)}"
         data = urllib.parse.urlencode(form).encode() if form is not None else None
         req = urllib.request.Request(url, data=data, method=method)
-        req.add_header("Authorization", f"Bearer {self.token}")
+        req.add_header("Authorization", self._authorization())
         if data is not None:
             req.add_header("Content-Type", "application/x-www-form-urlencoded")
         open_ = self.opener or urllib.request.urlopen

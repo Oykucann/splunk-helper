@@ -10,6 +10,8 @@ from shx.collect.environment import EnvironmentError_, load
 from shx.collect.searches import SEARCHES, indexes_search
 from shx.transport.rest import GuardError, RestClient, check_request, check_spl, mask_text
 
+BASIC = __import__("base64").b64encode(b"shx:pa55").decode()
+
 # --- guards ---------------------------------------------------------------------------
 
 
@@ -94,7 +96,7 @@ def fake_splunk():
             if method == "POST":
                 body = self.rfile.read(int(self.headers["Content-Length"])).decode()
                 form = dict(urllib.parse.parse_qsl(body))
-            assert self.headers["Authorization"] == "Bearer t0ken"
+            assert self.headers["Authorization"] in ("Bearer t0ken", "Basic " + BASIC)
             code, payload = fake.handle(method, parsed.path, parsed.query, form)
             data = json.dumps(payload).encode()
             self.send_response(code)
