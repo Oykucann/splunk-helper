@@ -1,4 +1,4 @@
-"""Static guard: the remote collector must be read-only and Python 3.7 compatible (ADR-0001)."""
+"""Static guard: the remote collector must be read-only, copy nothing, and stay Python 3.7-parseable (ADR-0001)."""
 
 import ast
 from pathlib import Path
@@ -6,7 +6,8 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parent.parent / "src" / "shx" / "remote" / "collect_remote.py"
 
 FORBIDDEN_IMPORTS = {"shutil", "pathlib", "urllib", "http", "requests", "ftplib", "smtplib",
-                     "telnetlib", "tempfile", "sqlite3", "multiprocessing", "ctypes"}
+                     "telnetlib", "tempfile", "sqlite3", "multiprocessing", "ctypes",
+                     "tarfile", "zipfile", "gzip", "io"}  # nothing is packaged or copied off the host
 FORBIDDEN_OS_CALLS = {
     "remove", "unlink", "rmdir", "removedirs", "rename", "renames", "replace", "mkdir",
     "makedirs", "chmod", "lchmod", "chown", "lchown", "symlink", "link", "truncate",
@@ -89,19 +90,16 @@ def test_subprocess_only_in_run_btool_and_only_btool():
     assert isinstance(argv.elts[3], ast.Constant) and argv.elts[3].value == "list"
 
 
-def test_tar_only_written_to_a_stream():
-    for node in ast.walk(_tree()):
-        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "open" and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "tarfile"):
-            assert not node.args, "tarfile.open must not take a filename"
-            kw = {k.arg: k.value for k in node.keywords}
-            assert "fileobj" in kw and "name" not in kw
-            assert isinstance(kw["mode"], ast.Constant) and kw["mode"].value == "w|gz"
-
-
 def test_no_network_sockets():
     for node in ast.walk(_tree()):
         if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
                 and node.value.id == "socket"):
             assert node.attr in ("gethostname", "getfqdn"), f"socket.{node.attr} at {node.lineno}"
+
+
+def test_only_stdout_is_written():
+    for node in ast.walk(_tree()):
+        if isinstance(node, ast.Attribute) and node.attr in ("write", "writelines"):
+            target = node.value
+            assert isinstance(target, ast.Attribute) and target.attr == "stdout", (
+                f".{node.attr} at line {node.lineno} must target sys.stdout")

@@ -1,24 +1,26 @@
-"""Everything the HTML report shows, computed from one collection run."""
+"""Everything the HTML report shows, computed from one collection run (summary + detail JSON)."""
 
 from __future__ import annotations
 
+import json
 import re
 import string
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from shx.apps import signature
 from shx.conf.btool import parse as parse_btool
-from shx.conf.files import parse_file
-from shx.snapshot import ServerSnapshot, load_run, read_members
+from shx.snapshot import ServerSnapshot, load_run
 
-# Instance-level confs shown from btool (non-default settings only).
 SYSTEM_CONFS = ("server", "web", "outputs", "deploymentclient", "distsearch", "limits",
                 "authentication", "authorize", "health", "alert_actions")
 UNIT_LIMIT_KEYS = ("LimitNOFILE", "LimitNPROC", "LimitCORE", "LimitFSIZE", "LimitDATA", "LimitAS",
                    "MemoryLimit", "MemoryMax", "MemoryHigh", "CPUQuota", "CPUShares", "CPUWeight",
                    "TasksMax", "User")
+KIND_LABEL = {"builtin": "Splunk", "vendor": "vendor", "custom": ""}
 UNSET = "—"
+NOT_COLLECTED = "alınamadı"
 _REDACTED_RE = re.compile(r"<redacted(?::(enc|plain))?(?::([0-9a-f]+))?>")
 
 
@@ -57,7 +59,7 @@ class ServerRow:
 def server_rows(snaps: list[ServerSnapshot]) -> list[ServerRow]:
     rows = []
     for s in snaps:
-        svc = s.manifest.get("service") or {}
+        svc = s.summary.get("service") or {}
         installs = svc.get("installs") or []
         product = ", ".join(f"{i.get('product')} ({i['home']})" for i in installs) or "Splunk bulunamadı"
         version = ", ".join(i.get("version") or "?" for i in installs)
@@ -77,7 +79,7 @@ def server_rows(snaps: list[ServerSnapshot]) -> list[ServerRow]:
                     limits.append(f"proses {short}={pl[name]['soft']}/{pl[name]['hard']}")
         rows.append(ServerRow(s.name, s.role_label, s.site or "", product, version, running,
                               service or "systemd/init.d servisi yok", ", ".join(limits) or UNSET,
-                              len(s.manifest.get("errors", []))))
+                              len(s.summary.get("errors", []))))
     return rows
 
 
@@ -88,12 +90,12 @@ class AppCopy:
     server: str
     root: str
     version: str
+    kind: str
     letter: str = ""
     local_files: int = 0
     disabled: bool = False
-    vendor_local_only: bool = False
-    content: tuple = ()
-    local_sha: str | None = None
+    signature: tuple = ()
+    content_id: tuple = ()  # version + shipped content; same id -> same letter
 
     @property
     def where(self) -> str:
@@ -118,68 +120,72 @@ class App:
     url: str | None = None
 
     @property
+    def kind(self) -> str:
+        return self.copies[0].kind if self.copies else "custom"
+
+    @property
     def versions(self) -> list[str]:
         return sorted({c.version for c in self.copies}, key=version_key)
+
+    @property
+    def identical(self) -> bool:
+        return len({c.signature for c in self.copies}) <= 1
 
     @property
     def newer_available(self) -> bool:
         return bool(self.latest) and all(version_key(self.latest) > version_key(v) for v in self.versions)
 
 
-def _app_conf(entries, root: str, app: str) -> dict[tuple, tuple[str, str]]:
+def _settings(detail: dict | None) -> dict[tuple, tuple[str, str]] | None:
+    if detail is None or detail.get("missing") or detail.get("error"):
+        return None
     merged = {}
     for layer in ("default", "local"):
-        for e in entries:
-            if e.location.root == root and e.location.app == app and e.location.layer == layer:
-                merged[(e.conf, e.stanza, e.key)] = (e.value, layer)
+        for lay, conf, stanza, key, value in detail.get("settings", []):
+            if lay == layer:
+                merged[(conf, stanza, key)] = (value, layer)
     return merged
 
 
-def _app_files(snap: ServerSnapshot, root: str, app: str) -> dict[str, str]:
-    prefix = f"etc/{root}/{app}/"
-    return {f["path"][len(prefix):]: (f.get("sha256") or "?")[:10] for f in snap.manifest.get("files", [])
-            if f["path"].startswith(prefix) and f.get("kind") != "conf"}
-
-
-def build_apps(snaps: list[ServerSnapshot], conf_entries: dict[str, list]) -> list[App]:
+def build_apps(snaps: list[ServerSnapshot]) -> list[App]:
     apps: dict[str, App] = {}
+    by_name = {s.name: s for s in snaps}
     for s in snaps:
         for a in s.apps:
             app = apps.setdefault(a["name"], App(a["name"]))
-            app.copies.append(AppCopy(
-                s.name, a["root"], a.get("version") or a.get("manifest_version") or "sürüm yok",
-                local_files=a.get("local_files") or 0,
-                disabled=(a.get("state") or "").lower() == "disabled",
-                vendor_local_only=bool(a.get("local_only")),
-                content=(a.get("version"), a.get("content_sha") or a.get("content_shape")),
-                local_sha=a.get("local_sha")))
-    by_name = {s.name: s for s in snaps}
+            app.copies.append(AppCopy(s.name, a["root"], a.get("version") or "sürüm yok", a.get("kind", "custom"),
+                                      local_files=a.get("local_files") or 0, disabled=bool(a.get("disabled")),
+                                      signature=signature(a), content_id=(a.get("version"), a.get("content_fp"))))
     for app in apps.values():
         app.copies.sort(key=lambda c: (c.server, c.root))
         letters: dict[tuple, str] = {}
         for c in app.copies:
-            letters.setdefault(c.content, string.ascii_uppercase[len(letters) % 26])
-            c.letter = letters[c.content]
-        if len(app.copies) < 2:
+            letters.setdefault(c.content_id, string.ascii_uppercase[len(letters) % 26])
+            c.letter = letters[c.content_id]
+        if app.identical:
             continue
-        settings = {c.where: _app_conf(conf_entries[c.server], c.root, app.name) for c in app.copies}
-        for conf, stanza, key in sorted({k for v in settings.values() for k in v}):
+        details = {c.where: by_name[c.server].app_detail(c.root, app.name) for c in app.copies}
+        settings = {w: _settings(d) for w, d in details.items()}
+        for conf, stanza, key in sorted({k for v in settings.values() if v for k in v}):
             values = {}
-            for c in app.copies:
-                hit = settings[c.where].get((conf, stanza, key))
-                values[c.where] = UNSET if hit is None else hit[0] + (" (local)" if hit[1] == "local" else "")
+            for w, st in settings.items():
+                if st is None:
+                    values[w] = NOT_COLLECTED
+                else:
+                    hit = st.get((conf, stanza, key))
+                    values[w] = UNSET if hit is None else hit[0] + (" (local)" if hit[1] == "local" else "")
             if len(set(values.values())) > 1:
                 app.diffs.append(SettingDiff(conf, stanza, key, label_secrets(values)))
-        files = {c.where: _app_files(by_name[c.server], c.root, app.name) for c in app.copies}
+        files = {w: {rel: sha for rel, sha in (d or {}).get("files", [])} for w, d in details.items()}
         for rel in sorted({f for v in files.values() for f in v}):
             values = {w: v.get(rel, "yok") for w, v in files.items()}
             if len(set(values.values())) > 1:
                 app.diffs.append(SettingDiff("dosya", rel, "", values))
-        app.notes = _notes(app)
-    return sorted(apps.values(), key=lambda a: a.name.lower())
+        app.notes = _notes(app, details)
+    return sorted(apps.values(), key=lambda a: (a.kind == "builtin", a.name.lower()))
 
 
-def _notes(app: App) -> list[str]:
+def _notes(app: App, details: dict) -> list[str]:
     notes = []
     if len(app.versions) > 1:
         by_version = defaultdict(list)
@@ -188,12 +194,15 @@ def _notes(app: App) -> list[str]:
         notes.append("Farklı sürümler: " + "; ".join(f"{v} → {', '.join(w)}" for v, w in
                                                       sorted(by_version.items(), key=lambda x: version_key(x[0]))))
     elif len({c.letter for c in app.copies}) > 1:
-        notes.append("Aynı sürüm, farklı içerik (default/ dosyaları değiştirilmiş).")
+        notes.append("Aynı sürüm, farklı içerik.")
     local = [c.where for c in app.copies if c.local_files]
     if local:
         notes.append("local/ değişikliği olanlar: " + ", ".join(local))
-    if any(c.vendor_local_only for c in app.copies):
-        notes.append("Vendor app: yalnızca local/ karşılaştırıldı.")
+    if app.kind in ("builtin", "vendor"):
+        notes.append(f"{'Splunk' if app.kind == 'builtin' else 'Vendor'} app: yalnızca local/ ayarları karşılaştırıldı.")
+    missing = [w for w, d in details.items() if _settings(d) is None]
+    if missing:
+        notes.append("Detayı alınamayanlar: " + ", ".join(missing))
     return notes
 
 
@@ -219,9 +228,11 @@ def _source(path: str) -> str:
     return "/".join(parts[1:3]) if len(parts) > 3 else path
 
 
-def build_system(snaps: list[ServerSnapshot], btool: dict[str, dict]) -> list[SystemRow]:
+def build_system(snaps: list[ServerSnapshot]) -> list[SystemRow]:
+    btool = {s.name: {conf: parse_btool(text) for conf, text in (s.summary.get("btool") or {}).items()}
+             for s in snaps}
     custom = set()
-    for name, confs in btool.items():
+    for confs in btool.values():
         for conf in SYSTEM_CONFS:
             for stanza, kv in confs.get(conf, {}).items():
                 custom |= {(conf, stanza, k) for k, v in kv.items() if not v.is_system_default}
@@ -254,15 +265,7 @@ class Report:
 
 
 def build(run_dir: str | Path, env_path: str | Path | None = None) -> Report:
-    import json
     run = json.loads((Path(run_dir) / "run.json").read_text())
     snaps = load_run(run_dir, env_path)
-    conf_entries, btool = {}, {}
-    for s in snaps:
-        entries = []
-        for path, text in read_members(s.archive, "etc/").items():
-            entries += parse_file(path, text)
-        conf_entries[s.name] = entries
-        btool[s.name] = {Path(p).stem: parse_btool(t) for p, t in read_members(s.archive, "btool/").items()}
     return Report(run.get("environment", ""), run.get("run_id", ""), server_rows(snaps),
-                  [s.name for s in snaps], build_apps(snaps, conf_entries), build_system(snaps, btool))
+                  [s.name for s in snaps], build_apps(snaps), build_system(snaps))

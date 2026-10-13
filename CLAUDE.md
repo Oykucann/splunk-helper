@@ -27,10 +27,11 @@ Remote collector: Splunk's bundled Python or the host python3 (3.6+), stdlib onl
 ## Layout
 
 - `src/shx/remote/collect_remote.py` — single file streamed to targets over SSH (read-only)
-- `src/shx/collect/` — `shx-collect`: environment file, sequential SSH collection
+- `src/shx/collect/` — `shx-collect`: environment file, sequential two-phase SSH collection
+- `src/shx/apps.py` — which app copies differ (selects phase-2 detail; used by the report)
 - `src/shx/report/` — `shx-report`: one HTML report (servers/service, apps, differences,
   Splunkbase versions, btool server settings)
-- `src/shx/conf/` — btool and raw .conf parsers
+- `src/shx/conf/btool.py` — btool output parser
 - `environments/` — per-environment config (gitignored except the example)
 - `snapshots/` — collected data and reports (gitignored, never committed)
 

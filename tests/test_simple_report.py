@@ -1,7 +1,8 @@
 import io
 import json
 
-from runbuilder import app, bt, make_run
+from runbuilder import app, bt, detail, make_run
+from shx.apps import differing_apps
 from shx.report import cli, splunkbase
 from shx.report.html import render
 from shx.report.model import build
@@ -16,16 +17,22 @@ SVC_NONE = {"installs": [], "systemd_units": [], "initd_script": False}
 
 SERVERS = {
     "sh1": {"role": "sh", "site": "site1", "service": SVC_ENT,
-            "apps": [app("Splunk_TA_windows", "8.9.0", sha="A", local="L", local_files=1), app("org_same", None)],
-            "files": {"etc/apps/Splunk_TA_windows/default/props.conf": "[WinEventLog]\nTRUNCATE = 10000\n",
-                      "etc/apps/Splunk_TA_windows/local/props.conf": "[WinEventLog]\nKV_MODE = none\n"},
+            "apps": [app("Splunk_TA_windows", "8.9.0", content="A", local="L1"), app("org_same", None),
+                     app("search", "9.1.2", kind="builtin", content="S", local="LS")],
+            "detail": [detail("Splunk_TA_windows", settings=[
+                ("default", "props", "WinEventLog", "TRUNCATE", "10000"),
+                ("local", "props", "WinEventLog", "KV_MODE", "none")], files=[("bin/run.ps1", "aaa")]),
+                detail("search", kind="builtin", settings=[("local", "savedsearches", "mine", "search", "index=a")])],
             "btool": {"server": bt("etc/system/local/server.conf", "general", serverName="sh1",
                                    pass4SymmKey="<redacted:enc:aaa111>")
                       + bt("etc/system/default/server.conf", "kvstore", port="8191"),
                       "web": bt("etc/system/local/web.conf", "settings", httpport="8000")}},
     "hf1": {"role": "hf", "site": "site1", "service": SVC_ENT,
-            "apps": [app("Splunk_TA_windows", "9.0.0", sha="B"), app("org_same", None)],
-            "files": {"etc/apps/Splunk_TA_windows/default/props.conf": "[WinEventLog]\nTRUNCATE = 20000\n"},
+            "apps": [app("Splunk_TA_windows", "9.0.0", content="B"), app("org_same", None),
+                     app("search", "9.1.2", kind="builtin", content="S")],
+            "detail": [detail("Splunk_TA_windows", settings=[("default", "props", "WinEventLog", "TRUNCATE", "20000")],
+                              files=[("bin/run.ps1", "bbb")]),
+                       detail("search", kind="builtin")],
             "btool": {"server": bt("etc/system/local/server.conf", "general", serverName="hf1",
                                    pass4SymmKey="<redacted:enc:bbb222>")
                       + bt("etc/system/default/server.conf", "kvstore", port="8191")}},
@@ -37,6 +44,14 @@ def fake_lookup(name):
     return {"Splunk_TA_windows": {"latest": "11.0.3", "url": "https://splunkbase.splunk.com/app/742/"}}.get(name)
 
 
+def test_differing_apps_picks_only_differing_copies():
+    summaries = {n: {"apps": s.get("apps", [])} for n, s in SERVERS.items()}
+    assert differing_apps(summaries) == {
+        "sh1": ["apps/Splunk_TA_windows", "apps/search"],
+        "hf1": ["apps/Splunk_TA_windows", "apps/search"],
+    }
+
+
 def test_model(tmp_path):
     r = build(make_run(tmp_path, SERVERS))
     s = {x.name: x for x in r.servers}
@@ -46,12 +61,18 @@ def test_model(tmp_path):
 
     apps = {a.name: a for a in r.apps}
     win = apps["Splunk_TA_windows"]
-    assert win.versions == ["8.9.0", "9.0.0"]
+    assert win.versions == ["8.9.0", "9.0.0"] and not win.identical
     diffs = {(d.conf, d.stanza, d.key): d.values for d in win.diffs}
     assert diffs[("props", "WinEventLog", "TRUNCATE")] == {"sh1": "10000", "hf1": "20000"}
     assert diffs[("props", "WinEventLog", "KV_MODE")] == {"sh1": "none (local)", "hf1": "—"}
+    assert diffs[("dosya", "bin/run.ps1", "")] == {"sh1": "aaa", "hf1": "bbb"}
     assert any(n.startswith("Farklı sürümler: 8.9.0 → sh1; 9.0.0 → hf1") for n in win.notes)
-    assert apps["org_same"].diffs == []
+    assert apps["org_same"].identical and apps["org_same"].diffs == []
+    search = apps["search"]
+    assert search.kind == "builtin" and {c.letter for c in search.copies} == {"A"}  # same shipped content
+    assert {(d.stanza, d.key) for d in search.diffs} == {("mine", "search")}
+    assert any("Splunk app: yalnızca local/" in n for n in search.notes)
+    assert [a.name for a in r.apps][-1] == "search"  # Splunk's own apps listed last
 
     sysrows = {(x.conf, x.stanza, x.key): x for x in r.system}
     p4 = sysrows[("server", "general", "pass4SymmKey")]
@@ -59,6 +80,14 @@ def test_model(tmp_path):
     assert p4.values["box9"] == "toplanmadı"
     assert ("server", "kvstore", "port") not in sysrows  # stock default, not shown
     assert sysrows[("web", "settings", "httpport")].sources == {"sh1": "system/local"}
+
+
+def test_missing_detail_is_marked(tmp_path):
+    servers = {k: dict(v) for k, v in SERVERS.items()}
+    servers["hf1"] = {**servers["hf1"], "detail": []}
+    win = {a.name: a for a in build(make_run(tmp_path, servers)).apps}["Splunk_TA_windows"]
+    assert {d.values["hf1"] for d in win.diffs if d.conf == "props"} == {"alınamadı"}
+    assert any(n.startswith("Detayı alınamayanlar: hf1") for n in win.notes)
 
 
 def test_splunkbase_lookup_and_cache(tmp_path):
@@ -69,6 +98,7 @@ def test_splunkbase_lookup_and_cache(tmp_path):
         "latest": "11.0.3", "url": "https://splunkbase.splunk.com/app/742/"}
     calls = []
     cache = tmp_path / "sb.json"
+
     def counting(name):
         calls.append(name)
         return fake_lookup(name)

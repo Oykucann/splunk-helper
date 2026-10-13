@@ -1,8 +1,13 @@
-"""shx-collect: collect read-only snapshots from every server in an environment.
+"""shx-collect: read every server in an environment, without copying files off them.
 
+    shx-collect environments/acme.toml --dry-run
     shx-collect environments/acme.toml --check
-    shx-collect environments/acme.toml --only hf01
     shx-collect environments/acme.toml
+
+Phase 1 (every server): a summary — app versions and fingerprints, Splunk service, and btool
+for instance-level confs. Phase 2 (only servers holding apps whose copies differ): the
+redacted conf values of those apps. Both phases print JSON on the server's stdout and exit;
+nothing is written on the server.
 """
 
 from __future__ import annotations
@@ -16,24 +21,23 @@ import secrets
 import shlex
 import subprocess
 import sys
-import tarfile
 from pathlib import Path
 
+from shx.apps import differing_apps
 from shx.collect.environment import EnvironmentError_, Server, load
 
 REMOTE_SCRIPT = Path(__file__).resolve().parent.parent / "remote" / "collect_remote.py"
-GZIP_MAGIC = b"\x1f\x8b"
 
 
-def remote_command(server: Server, check: bool) -> str:
+def remote_command(server: Server, mode: str = "summary", apps: list[str] = ()) -> str:
     home = shlex.quote(server.splunk_home)
-    args = ["--splunk-home", home]
-    if check:
-        args.append("--check")
-    if not server.btool:
+    args = ["--splunk-home", home, f"--{mode}"]
+    if mode == "summary" and not server.btool:
         args.append("--no-btool")
     for pattern in server.local_only_apps:
-        args += ["--local-only-app", shlex.quote(pattern)]
+        args += ["--vendor-app", shlex.quote(pattern)]
+    for app in apps:
+        args += ["--app", shlex.quote(app)]
     # -B: never write __pycache__/*.pyc; nothing may be left behind on the server.
     python = f"{home}/bin/splunk cmd python3" if server.interpreter == "splunk" else "python3"
     cmd = f"{python} -B - {' '.join(args)}"
@@ -53,10 +57,10 @@ def ssh_auth_options(server: Server) -> list[str]:
     return opts
 
 
-def ssh_argv(server: Server, check: bool) -> list[str]:
+def ssh_argv(server: Server, mode: str = "summary", apps: list[str] = ()) -> list[str]:
     target = f"{server.ssh_user}@{server.host}" if server.ssh_user else server.host
     return ["ssh", "-T", *ssh_auth_options(server), *server.ssh_options, target,
-            remote_command(server, check)]
+            remote_command(server, mode, apps)]
 
 
 def script_payload(salt: str) -> bytes:
@@ -65,56 +69,21 @@ def script_payload(salt: str) -> bytes:
     return f'_INJECTED_SALT = "{salt}"\n'.encode() + REMOTE_SCRIPT.read_bytes()
 
 
-def validate_snapshot(path: Path) -> dict:
-    with path.open("rb") as fh:
-        if fh.read(2) != GZIP_MAGIC:
-            raise ValueError("output is not gzip (remote printed something else to stdout?)")
-    with tarfile.open(path, "r:gz") as tar:
-        member = tar.getmember("manifest.json")
-        manifest = json.load(tar.extractfile(member))
-    return {
-        "hostname": manifest.get("hostname"),
-        "splunk_version": manifest.get("splunk_version"),
-        "files": len(manifest.get("files", [])),
-        "redactions": manifest.get("redactions"),
-        "errors": len(manifest.get("errors", [])),
-    }
-
-
-def run_check(server: Server) -> dict:
-    proc = subprocess.run(
-        ssh_argv(server, check=True), input=script_payload(""),
-        capture_output=True, timeout=120,
-    )
-    if proc.returncode != 0:
-        return {"ok": False, "stderr": proc.stderr.decode(errors="replace")[-2000:]}
+def run_remote(server: Server, mode: str, salt: str, apps: list[str] = (), timeout: int | None = None) -> dict:
+    """Run the remote script once; return {"ok", "data"|"error", "stderr"}."""
     try:
-        return {"ok": True, **json.loads(proc.stdout.decode().strip().splitlines()[-1])}
+        proc = subprocess.run(ssh_argv(server, mode, apps), input=script_payload(salt),
+                              capture_output=True, timeout=timeout or server.timeout_seconds)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"timeout after {timeout or server.timeout_seconds}s", "stderr": ""}
+    stderr = proc.stderr.decode(errors="replace")[-4000:]
+    if proc.returncode != 0:
+        return {"ok": False, "error": f"ssh exit {proc.returncode}", "stderr": stderr}
+    lines = proc.stdout.decode(errors="replace").strip().splitlines()
+    try:
+        return {"ok": True, "data": json.loads(lines[-1]), "stderr": stderr}
     except (ValueError, IndexError):
-        return {"ok": False, "stdout": proc.stdout.decode(errors="replace")[-2000:]}
-
-
-def collect_one(server: Server, run_dir: Path, salt: str) -> dict:
-    final = run_dir / f"{server.name}.tar.gz"
-    partial = final.with_suffix(".gz.partial")
-    log_path = run_dir / f"{server.name}.stderr.log"
-    with partial.open("wb") as out, log_path.open("wb") as err:
-        proc = subprocess.Popen(ssh_argv(server, check=False), stdin=subprocess.PIPE,
-                                stdout=out, stderr=err)
-        try:
-            proc.communicate(script_payload(salt), timeout=server.timeout_seconds)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            return {"ok": False, "error": f"timeout after {server.timeout_seconds}s"}
-    if proc.returncode != 0:
-        return {"ok": False, "error": f"ssh exit {proc.returncode}, see {log_path.name}"}
-    try:
-        summary = validate_snapshot(partial)
-    except (ValueError, KeyError, tarfile.TarError) as exc:
-        return {"ok": False, "error": f"invalid snapshot: {exc}"}
-    partial.rename(final)
-    return {"ok": True, "snapshot": final.name, **summary}
+        return {"ok": False, "error": "no JSON on stdout", "stderr": stderr}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -138,11 +107,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         for s in servers:
             print(f"# {s.name} ({'+'.join(s.roles)}{', ' + s.ha_group if s.ha_group else ''})")
-            print(shlex.join(ssh_argv(s, check=args.check)))
+            print(shlex.join(ssh_argv(s, "check" if args.check else "summary")))
+        print("# phase 2 (--detail) runs only on servers holding apps whose copies differ")
         return 0
 
     if args.check:
-        results = {s.name: run_check(s) for s in servers}
+        results = {}
+        for s in servers:
+            r = run_remote(s, "check", "", timeout=120)
+            results[s.name] = {"ok": True, **r["data"]} if r["ok"] else \
+                {"ok": False, "error": r["error"], "stderr": r["stderr"]}
         print(json.dumps(results, indent=2, sort_keys=True))
         return 0 if all(r["ok"] for r in results.values()) else 1
 
@@ -151,23 +125,54 @@ def main(argv: list[str] | None = None) -> int:
     run_dir.mkdir(parents=True)
     salt = secrets.token_hex(16)  # in memory only; never persisted (ADR-0001)
     run = {
-        "environment": env.name,
-        "run_id": run_id,
+        "environment": env.name, "run_id": run_id,
         "remote_script_sha256": hashlib.sha256(REMOTE_SCRIPT.read_bytes()).hexdigest(),
         "servers": {s.name: {"role": s.role, "site": s.site, "ha_group": s.ha_group, "host": s.host,
                              "also_roles": list(s.also_roles)} for s in servers},
     }
-    outcomes = []
-    for s in servers:  # strictly sequential (ADR-0001)
-        print(f"[{s.name}] collecting from {s.host} ...", file=sys.stderr, flush=True)
-        result = collect_one(s, run_dir, salt)
-        run["servers"][s.name].update(result)
-        outcomes.append(result["ok"])
-        print(f"[{s.name}] {'ok' if result['ok'] else 'FAILED: ' + result['error']}",
-              file=sys.stderr, flush=True)
+
+    def save():
         (run_dir / "run.json").write_text(json.dumps(run, indent=2, sort_keys=True))
+
+    def log(server, msg):
+        print(f"[{server}] {msg}", file=sys.stderr, flush=True)
+
+    summaries, ok = {}, True
+    for s in servers:  # phase 1, strictly sequential (ADR-0001)
+        log(s.name, f"summary from {s.host} ...")
+        r = run_remote(s, "summary", salt)
+        entry = run["servers"][s.name]
+        if r["ok"]:
+            (run_dir / f"{s.name}.summary.json").write_text(json.dumps(r["data"], indent=1, sort_keys=True))
+            summaries[s.name] = r["data"]
+            entry.update(ok=True, summary=f"{s.name}.summary.json", apps=len(r["data"].get("apps", [])),
+                         errors=len(r["data"].get("errors", [])))
+            log(s.name, f"ok ({entry['apps']} apps)")
+        else:
+            ok = False
+            entry.update(ok=False, error=r["error"], stderr=r["stderr"][-1000:])
+            log(s.name, f"FAILED: {r['error']}")
+        save()
+
+    wanted = differing_apps(summaries)
+    by_name = {s.name: s for s in servers}
+    for name in [s.name for s in servers if s.name in wanted]:  # phase 2, same order
+        s = by_name[name]
+        log(name, f"detail for {len(wanted[name])} differing apps ...")
+        r = run_remote(s, "detail", salt, wanted[name])
+        entry = run["servers"][name]
+        if r["ok"]:
+            (run_dir / f"{name}.detail.json").write_text(json.dumps(r["data"], indent=1, sort_keys=True))
+            entry.update(detail=f"{name}.detail.json", detail_apps=len(wanted[name]))
+            log(name, "ok")
+        else:
+            ok = False
+            entry.update(detail_error=r["error"])
+            log(name, f"detail FAILED: {r['error']}")
+        save()
+    save()
     print(run_dir)
-    return 0 if all(outcomes) else 1
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

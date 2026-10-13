@@ -1,10 +1,8 @@
-"""Build synthetic collection runs (run.json + snapshot tars + rest.json) for rule tests."""
+"""Build synthetic collection runs (run.json + <server>.summary.json + <server>.detail.json)."""
 
 from __future__ import annotations
 
-import io
 import json
-import tarfile
 from pathlib import Path
 
 HOME = "/data/splunk"
@@ -17,35 +15,31 @@ def bt(path: str, stanza: str, **kv) -> str:
     return "\n".join(lines) + "\n"
 
 
-def app(name, version="1.0", root="apps", sha="c1", local=None, local_files=0, local_only=None):
-    return {"name": name, "root": root, "path": f"etc/{root}/{name}", "version": version,
-            "content_sha": None if local_only else sha, "content_shape": f"shape-{sha}",
-            "local_sha": local, "local_files": local_files or (1 if local else 0),
-            "local_only": local_only, "state": None}
+def app(name, version="1.0", root="apps", kind="custom", content="c1", local=None, local_files=0,
+        disabled=False):
+    """One entry of summary["apps"]."""
+    return {"name": name, "root": root, "kind": kind, "version": version, "content_fp": content,
+            "local_fp": local, "local_files": local_files or (1 if local else 0), "disabled": disabled}
 
 
-def make_run(tmp: Path, servers: dict, rest: dict | None = None, env="test") -> Path:
+def detail(name, root="apps", kind="custom", settings=(), files=()):
+    """One entry of detail["apps"]: settings are (layer, conf, stanza, key, value)."""
+    return {"name": name, "root": root, "kind": kind, "settings": [list(s) for s in settings],
+            "files": [list(f) for f in files]}
+
+
+def make_run(tmp: Path, servers: dict, env="test") -> Path:
     run = {"environment": env, "run_id": "r1", "servers": {}}
     for name, spec in servers.items():
-        manifest = {"hostname": name, "apps": spec.get("apps", []), "files": spec.get("manifest_files", []),
-                    "path_checks": spec.get("path_checks", []),
-                    "splunk_version": spec.get("version", "VERSION=9.1.2"), "splunk_secret_sha256": "s",
-                    "service": spec.get("service", {})}
-        members = {"manifest.json": json.dumps(manifest)}
-        members |= {f"btool/{c}.txt": t for c, t in spec.get("btool", {}).items()}
-        members |= spec.get("files", {})
-        with tarfile.open(tmp / f"{name}.tar.gz", "w:gz") as tar:
-            for mname, text in members.items():
-                data = text.encode()
-                info = tarfile.TarInfo(mname)
-                info.size = len(data)
-                tar.addfile(info, io.BytesIO(data))
-        run["servers"][name] = {"ok": True, "snapshot": f"{name}.tar.gz", "role": spec["role"],
-                                "site": spec.get("site"), "ha_group": spec.get("ha"), "host": spec.get("host", name),
-                                "pull_apps": spec.get("pull_apps", []), "also_roles": spec.get("also_roles", [])}
-    for sh, searches in (rest or {}).items():
-        payload = {"searches": {sid: {"ok": True, "results": rows} for sid, rows in searches.items()}}
-        (tmp / f"{sh}.rest.json").write_text(json.dumps(payload))
-        run["servers"].setdefault(sh, {"role": "sh"})["rest"] = {"ok": True, "file": f"{sh}.rest.json"}
+        summary = {"hostname": name, "apps": spec.get("apps", []), "btool": spec.get("btool", {}),
+                   "service": spec.get("service", {}), "errors": spec.get("errors", [])}
+        (tmp / f"{name}.summary.json").write_text(json.dumps(summary))
+        entry = {"ok": True, "summary": f"{name}.summary.json", "role": spec["role"], "site": spec.get("site"),
+                 "ha_group": spec.get("ha"), "host": spec.get("host", name),
+                 "also_roles": spec.get("also_roles", [])}
+        if spec.get("detail"):
+            (tmp / f"{name}.detail.json").write_text(json.dumps({"apps": spec["detail"]}))
+            entry["detail"] = f"{name}.detail.json"
+        run["servers"][name] = entry
     (tmp / "run.json").write_text(json.dumps(run))
     return tmp

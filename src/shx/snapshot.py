@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-import tarfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -14,9 +13,8 @@ class ServerSnapshot:
     role: str
     site: str | None
     ha_group: str | None
-    manifest: dict
-    archive: Path
-    # Extra roles on the same instance; comparisons group by the primary `role`.
+    summary: dict
+    detail: dict = field(default_factory=dict)   # phase 2; empty when nothing differed
     also_roles: tuple[str, ...] = ()
 
     @property
@@ -29,22 +27,13 @@ class ServerSnapshot:
 
     @property
     def apps(self) -> list[dict]:
-        return self.manifest.get("apps", [])
+        return self.summary.get("apps", [])
 
-
-def read_manifest(archive: Path) -> dict:
-    with tarfile.open(archive, "r:gz") as tar:
-        return json.load(tar.extractfile("manifest.json"))
-
-
-def read_members(archive: Path, prefix: str) -> dict[str, str]:
-    """All text members under `prefix`, in one pass over the archive."""
-    out = {}
-    with tarfile.open(archive, "r:gz") as tar:
-        for member in tar:
-            if member.isfile() and member.name.startswith(prefix):
-                out[member.name] = tar.extractfile(member).read().decode("utf-8", "replace")
-    return out
+    def app_detail(self, root: str, name: str) -> dict | None:
+        for a in self.detail.get("apps", []):
+            if a.get("root") == root and a.get("name") == name:
+                return a
+        return None
 
 
 def load_run(run_dir: str | Path, env_path: str | Path | None = None) -> list[ServerSnapshot]:
@@ -56,17 +45,17 @@ def load_run(run_dir: str | Path, env_path: str | Path | None = None) -> list[Se
     if env_path:
         from shx.collect.environment import load as load_env
         overrides = {s.name: {"role": s.role, "site": s.site, "ha_group": s.ha_group,
-                              "also_roles": list(s.also_roles)}
-                     for s in load_env(env_path).servers}
+                              "also_roles": list(s.also_roles)} for s in load_env(env_path).servers}
     snapshots = []
     for name, info in sorted(run["servers"].items()):
         if not info.get("ok"):
             continue
         info = {**info, **overrides.get(name, {})}
-        archive = run_dir / info["snapshot"]
+        summary = json.loads((run_dir / info["summary"]).read_text())
+        detail_file = info.get("detail")
+        detail = json.loads((run_dir / detail_file).read_text()) if detail_file else {}
         snapshots.append(ServerSnapshot(
             name=name, role=info["role"], site=info.get("site"), ha_group=info.get("ha_group"),
-            manifest=read_manifest(archive), archive=archive,
-            also_roles=tuple(info.get("also_roles") or ()),
+            summary=summary, detail=detail, also_roles=tuple(info.get("also_roles") or ()),
         ))
     return snapshots

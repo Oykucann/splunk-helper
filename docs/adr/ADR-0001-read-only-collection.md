@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted (2026-10-06); amended 2026-10-13: REST removed, `-B`, host python for UFs.
+Accepted (2026-10-06); amended 2026-10-13: REST removed, `-B`, host python for UFs, no file
+copies (two-phase JSON instead of a tar).
 
 ## Context
 
@@ -13,10 +14,11 @@ expensive. We need discovery data within one week, without a separate hardening 
 
 ## Decision
 
-1. **File-level data via SSH, streamed script.** `collect_remote.py` is piped to
-   `splunk cmd python3 -B -` over the operator's existing SSH access, as the splunk user.
-   Nothing is installed or written on the target, and nothing is left behind (`-B` prevents
-   `.pyc` files). Output is a `tar.gz` on stdout. Only OS/Splunk logging outside our control
+1. **SSH, streamed script, JSON out, no file copies.** `collect_remote.py` is piped to
+   `python3 -B -` (Splunk's or the host's) over the operator's SSH access. Phase 1 returns a
+   summary (app versions and fingerprints, service, btool for instance-level confs); phase 2
+   returns masked conf values only for apps whose copies differ between servers. Nothing is
+   installed, written or left behind on the target. Only OS/Splunk logging outside our control
    (sshd/sudo auth logs, Splunk CLI utility log lines) records that a session happened.
 2. **The remote script is read-only by construction.** It may only read files, stat paths
    and run `splunk btool <conf> list --debug`. A test parses its AST and fails on any

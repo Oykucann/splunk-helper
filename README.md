@@ -12,13 +12,22 @@ Reads Splunk servers over SSH, **read-only**, and produces one simple HTML repor
   distsearch, limits, authentication, authorize, health and alert_actions, with differing rows
   highlighted.
 
-## Nothing is left on the servers
+## No files are copied, nothing is left on the servers
 
-The collector is one script streamed over SSH to stdin and run as `python3 -B -`. It uses
-Splunk's `splunk cmd python3`, or the host `python3` on universal forwarders. It only reads
-files and runs `splunk btool … list`. It installs nothing, writes no file (no tar, no `.pyc`)
-and changes nothing. The output streams back to your machine and the process exits. Secrets
-are masked before they leave the server. Tests enforce this
+Collection runs in two phases. Both stream one script over SSH to stdin, run it as
+`python3 -B -` (Splunk's `splunk cmd python3`, or the host `python3` on universal forwarders),
+and get one JSON document back on stdout:
+
+1. **Summary**, from every server: app names, versions and two fingerprints per app (shipped
+   content and `local/`), the Splunk service, and `btool` for the instance-level confs only.
+   No app file and no app setting leaves the server.
+2. **Detail**, only from servers that hold an app whose copies differ: the masked conf values
+   of those apps. For Splunk's own apps and vendor apps such as ES, only `local/` is read.
+
+Splunk's own apps are recognised from the installation's `*-manifest` file, so the list follows
+the installed version. The script only reads files and runs `splunk btool … list`. It installs
+nothing, writes no file (no tar, no `.pyc`) and changes nothing. Secrets are masked before they
+leave the server. Tests enforce this
 (`tests/test_remote_guard.py`, `tests/test_remote_collect.py::test_writes_nothing_on_target`).
 Only the OS and Splunk logs record that an SSH/sudo session or a Splunk CLI command ran.
 
@@ -59,7 +68,7 @@ Splunkbase, or `--env environments/<env>.toml` to relabel roles and sites withou
 | `ssh_user`, `ssh_auth`, `ssh_key`, `ssh_options`, `run_as` | How to log in |
 | `splunk_home` | Default `/data/splunk`; e.g. `/opt/splunkforwarder` for UFs |
 | `python` | `splunk` (default) or `system` (default for `uf`) |
-| `local_only_apps` | Extra large vendor apps to read `local/` only (ES and built-ins already are) |
+| `local_only_apps` | Extra vendor apps to compare by `local/` only (ES and Splunk's own apps already are) |
 
 Example: [environments/example.toml](environments/example.toml).
 

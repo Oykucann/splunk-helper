@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from html import escape
 
-from shx.report.model import Report
+from shx.report.model import KIND_LABEL, Report
 
 CSS = """
 :root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--hi:#fff4d6;--new:#e3f4e8;--head:#f5f5f7}
@@ -46,7 +46,7 @@ def apps_section(r: Report) -> str:
             text = f"{c.version} {c.letter}" + (" · local" if c.local_files else "") + \
                    (" · disabled" if c.disabled else "") + ("" if c.root == "apps" else f" ({c.root})")
             cells[c.server].append(_e(text))
-        differs = bool(app.diffs) or len({c.letter for c in app.copies}) > 1
+        differs = not app.identical
         sb = ""
         if app.latest:
             link = f'<a href="{_e(app.url)}">{_e(app.latest)}</a>' if app.url else _e(app.latest)
@@ -54,12 +54,13 @@ def apps_section(r: Report) -> str:
         else:
             sb = "<td></td>"
         name = f'<a href="#app-{_e(app.name)}">{_e(app.name)}</a>' if app.diffs else _e(app.name)
-        rows.append(f"<tr><td>{name}</td>"
+        rows.append(f"<tr><td>{name}</td><td>{_e(KIND_LABEL[app.kind])}</td>"
                     + "".join(f'<td{" class=hi" if differs and cells.get(s) else ""}>{"<br>".join(cells.get(s, []))}</td>'
                               for s in r.server_names) + sb + "</tr>")
     legend = ('<p class="muted">Aynı harf = aynı sürüm ve aynı içerik. “local” = sunucuda local/ değişikliği var. '
-              'Sarı satırlarda kopyalar farklı; app adına tıklayınca farklar açılır.</p>')
-    return "<h2>App'ler</h2>" + legend + _table(["App", *r.server_names, "Splunkbase son sürüm"], rows)
+              'Sarı satırlarda kopyalar farklı; app adına tıklayınca farklar açılır. '
+              'Tür “Splunk” = Splunk ile gelen app (kurulum manifest dosyasından).</p>')
+    return "<h2>App'ler</h2>" + legend + _table(["App", "Tür", *r.server_names, "Splunkbase son sürüm"], rows)
 
 
 def diffs_section(r: Report) -> str:
