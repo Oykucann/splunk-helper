@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Dict
 
 # "<source path><whitespace><conf line>"; the path is absolute on the target host.
 _LINE_RE = re.compile(r"^(?P<src>/\S+|[A-Za-z]:\\\S+)\s+(?P<body>.*)$")
@@ -20,7 +21,7 @@ class Setting:
 
 
 # stanza -> key -> Setting
-EffectiveConf = dict[str, dict[str, Setting]]
+EffectiveConf = Dict[str, Dict[str, Setting]]
 
 
 def _relative(src: str) -> str:

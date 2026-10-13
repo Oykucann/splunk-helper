@@ -37,7 +37,8 @@ Details: [ADR-0001](docs/adr/ADR-0001-read-only-collection.md),
 
 ## Requirements
 
-- **Python 3.11+** on the machine running the tool. No extra packages (standard library only).
+- **Python 3.9+** on the machine running the tool. No extra packages (standard library only;
+  on 3.9/3.10 a built-in reader replaces `tomllib`).
 - SSH to the targets with a key (default) or a password (`ssh_auth = "password"`, ssh prompts
   per server), and passwordless `sudo -n -u splunk` (or connect directly as the `splunk` user).
 - For REST: a user with a read-only role on each search head, with a token (default) or a

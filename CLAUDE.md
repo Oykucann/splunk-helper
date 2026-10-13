@@ -6,7 +6,7 @@ ahead of a migration to a multisite indexer cluster + search head cluster.
 ## Project
 
 Language: Python (stdlib only at runtime)
-Local tooling: Python 3.11+ (`tomllib`)
+Local tooling: Python 3.9+ (`shx._toml` falls back when `tomllib` is missing)
 Remote collector: must run on Splunk's bundled Python (3.7+), stdlib only
 
 ## Conventions

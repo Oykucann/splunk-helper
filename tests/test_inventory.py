@@ -1,4 +1,4 @@
-import tomllib
+from shx import _toml
 
 from runbuilder import app, bt, make_run
 from shx.inventory import inventory_cli
@@ -94,7 +94,7 @@ def test_cli_then_env_override_without_recollecting(tmp_path):
     reports = run_dir / "reports"
     toml = (reports / "suggested_env.toml").read_text()
     assert 'ha_group = "site1-vi-syslog"' in toml and 'pull_apps = ["TA-poll", "splunk_app_db_connect"]' in toml
-    parsed = tomllib.loads(toml)
+    parsed = _toml.loads(toml)
     assert parsed["suggested"]["hf1b"]["pull_apps"] == ["TA-poll", "splunk_app_db_connect"]
     assert parsed["vips"] == ["10.0.1.100", "10.0.2.100"]
     md = (reports / "inventory.md").read_text()

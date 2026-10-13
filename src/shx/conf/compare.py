@@ -12,10 +12,11 @@ are compared, so stock defaults don't produce noise.
 from __future__ import annotations
 
 import fnmatch
-import tomllib
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from shx import _toml
 
 from shx.conf.btool import EffectiveConf, Setting, parse
 from shx.conf.inputs import PULL_CONFS, app_of_source
@@ -43,7 +44,7 @@ class Expectations:
 
     @classmethod
     def load(cls, path: Path = EXPECTATIONS_FILE) -> "Expectations":
-        return cls(tomllib.loads(path.read_text()).get("rule", []))
+        return cls(_toml.loads(path.read_text()).get("rule", []))
 
     def lookup(self, conf: str, stanza: str, key: str) -> Expectation:
         for r in self.rules:

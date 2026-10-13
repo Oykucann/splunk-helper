@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import socket
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from shx import _toml
 
 ROLES = ("sh", "deployer", "cm", "ds", "idx", "hf")
 # Collection order: least critical first; HA-group HFs last (ADR-0001).
@@ -97,7 +98,7 @@ _SERVER_ONLY_KEYS = {"name", "host", "role", "site", "ha_group", "rest_token_env
 
 
 def load(path: str | Path) -> Environment:
-    data = tomllib.loads(Path(path).read_text())
+    data = _toml.loads(Path(path).read_text())
     name = data.get("name")
     if not name:
         raise EnvironmentError_("environment 'name' is required")
