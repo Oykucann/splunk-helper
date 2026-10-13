@@ -6,7 +6,7 @@ into a multisite indexer cluster with a search head cluster.
 **Site**: A physical/logical location (`site1`, `site2`). Today sites are independent;
 content may be the same or different between them.
 
-**Server**: One Splunk instance with a role: `sh`, `cm`, `ds`, `deployer`, `hf`, `idx`.
+**Server**: One Splunk instance with a role: `sh`, `cm`, `ds`, `deployer`, `hf`, `idx`, `uf`.
 A lab instance may carry extra roles (`also_roles`, e.g. SH that is also the CM); it is collected
 once, rules see every role, comparisons group it under its primary `role`.
 
@@ -14,9 +14,6 @@ once, rules see every role, comparisons group it under its primary `role`.
 a keepalived pair, or N HFs behind haproxy. All members must be configured identically.
 
 **Pull HF**: A dedicated heavy forwarder running pull inputs. Not part of an HA group.
-
-**Co-located pull role**: An HA-group member that also runs pull inputs on its own address
-(not the VIP), declared with `pull_apps`. Unaffected by VIP moves; no failover if the node is down.
 
 **Push Input**: Data sent to Splunk: syslog (udp/tcp), HEC, splunktcp (UF → HF).
 Must be identical on every member of an HA group.

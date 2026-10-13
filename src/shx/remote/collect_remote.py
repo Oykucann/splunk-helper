@@ -354,6 +354,101 @@ def read_text_or_none(path):
         return None
 
 
+# --- Splunk service and installs (file reads only) ----------------------------------
+
+INSTALL_CANDIDATES = ["/opt/splunk", "/opt/splunkforwarder", "/data/splunk", "/data/splunkforwarder"]
+UNIT_DIRS = ["/etc/systemd/system", "/usr/lib/systemd/system", "/lib/systemd/system"]
+UNIT_KEYS = ("ExecStart", "User", "Group", "Restart", "LimitNOFILE", "LimitNPROC", "LimitCORE",
+             "LimitFSIZE", "LimitDATA", "LimitAS", "MemoryLimit", "MemoryMax", "MemoryHigh",
+             "CPUQuota", "CPUShares", "CPUWeight", "TasksMax", "Delegate", "KillMode",
+             "TimeoutStopSec", "Nice")
+PROC_LIMITS = ("Max open files", "Max processes", "Max file size", "Max core file size",
+               "Max data size", "Max address space")
+PRODUCTS = {"splunk": "Splunk Enterprise", "universalforwarder": "Universal Forwarder"}
+
+
+def parse_kv_file(text):
+    out = {}
+    for line in (text or "").splitlines():
+        if "=" in line and not line.strip().startswith("#"):
+            k, v = line.split("=", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+
+def install_info(home):
+    version = parse_kv_file(read_text_or_none(os.path.join(home, "etc", "splunk.version")))
+    if not version:
+        return None
+    info = {"home": home, "product": PRODUCTS.get(version.get("PRODUCT", ""), version.get("PRODUCT")),
+            "version": version.get("VERSION"), "build": version.get("BUILD"), "running": False}
+    pid_text = read_text_or_none(os.path.join(home, "var", "run", "splunk", "splunkd.pid"))
+    pid = (pid_text or "").split()[0] if pid_text else ""
+    if pid.isdigit() and os.path.isdir("/proc/" + pid):
+        info["running"] = True
+        info["pid"] = int(pid)
+        try:
+            info["run_user"] = owner_name(os.stat("/proc/" + pid).st_uid)
+        except OSError:
+            pass
+        limits = {}
+        for line in (read_text_or_none("/proc/%s/limits" % pid) or "").splitlines():
+            for name in PROC_LIMITS:
+                if line.startswith(name):
+                    parts = line[len(name):].split()
+                    limits[name] = {"soft": parts[0], "hard": parts[1]} if len(parts) >= 2 else line
+        info["process_limits"] = limits
+    return info
+
+
+def unit_settings(texts):
+    settings = {}
+    for text in texts:
+        for line in (text or "").splitlines():
+            line = line.strip()
+            if "=" in line and not line.startswith(("#", ";")):
+                k, v = line.split("=", 1)
+                if k.strip() in UNIT_KEYS:
+                    settings[k.strip()] = v.strip()
+    return settings
+
+
+def splunk_units():
+    units, seen = [], set()
+    for d in UNIT_DIRS:
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(".service") or "splunk" not in name.lower() or name in seen:
+                continue
+            seen.add(name)  # first directory wins, as in systemd (/etc overrides /usr/lib)
+            path = os.path.join(d, name)
+            texts = [read_text_or_none(path)]
+            dropins = []
+            for dd in [os.path.join(x, name + ".d") for x in UNIT_DIRS]:
+                try:
+                    for f in sorted(os.listdir(dd)):
+                        if f.endswith(".conf"):
+                            dropins.append(os.path.join(dd, f))
+                            texts.append(read_text_or_none(os.path.join(dd, f)))
+                except OSError:
+                    pass
+            enabled = any(os.path.exists(os.path.join(UNIT_DIRS[0], t + ".wants", name))
+                          for t in ("multi-user.target", "default.target"))
+            units.append({"unit": name, "path": path, "dropins": dropins, "enabled": enabled,
+                          "settings": unit_settings(texts)})
+    return units
+
+
+def service_info(splunk_home):
+    homes = [splunk_home] + [h for h in INSTALL_CANDIDATES if h != splunk_home]
+    installs = [i for i in (install_info(h) for h in homes) if i]
+    return {"installs": installs, "systemd_units": splunk_units(),
+            "initd_script": os.path.exists("/etc/init.d/splunk")}
+
+
 # --- collection ---------------------------------------------------------------------
 
 class Collector(object):
@@ -579,6 +674,7 @@ class Collector(object):
             "redactions": self.redactor.count,
             "btool": self.btool_results,
             "system_files": self.system_files,
+            "service": service_info(self.home),
             "apps": self.apps,
             "local_only_apps": self.local_only_apps,
             "local_only_patterns": self.local_only_patterns,
@@ -615,6 +711,7 @@ def check(splunk_home):
         "btool_present": os.access(os.path.join(splunk_home, "bin", "splunk"), os.X_OK),
         "roots": {},
         "system_files": {},
+        "service": service_info(splunk_home),
     }
     for root, _active in SCAN_ROOTS:
         path = os.path.join(etc, root)

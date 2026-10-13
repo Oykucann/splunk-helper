@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-06)
+Accepted (2026-10-06); amended 2026-10-13: REST removed, `-B`, host python for UFs.
 
 ## Context
 
@@ -26,8 +26,7 @@ expensive. We need discovery data within one week, without a separate hardening 
    for the run, so equal secrets can be compared across servers but not brute-forced later.
    Lookup files and script bodies are never copied; only metadata and suspected-secret line
    numbers.
-4. **No REST on heavy forwarders.** Runtime facts about HFs come from `_internal` searches
-   on the search head (later slice). REST is used only against the SH, with a read-only role.
+4. **No REST.** Nothing is queried over the management port; everything is read over SSH.
 5. **No VIPs; sequential.** The driver refuses targets listed as VIPs and collects one
    server at a time, at lowest CPU priority, with a timeout.
 

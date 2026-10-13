@@ -29,7 +29,8 @@ def make_run(tmp: Path, servers: dict, rest: dict | None = None, env="test") -> 
     for name, spec in servers.items():
         manifest = {"hostname": name, "apps": spec.get("apps", []), "files": spec.get("manifest_files", []),
                     "path_checks": spec.get("path_checks", []),
-                    "splunk_version": spec.get("version", "VERSION=9.1.2"), "splunk_secret_sha256": "s"}
+                    "splunk_version": spec.get("version", "VERSION=9.1.2"), "splunk_secret_sha256": "s",
+                    "service": spec.get("service", {})}
         members = {"manifest.json": json.dumps(manifest)}
         members |= {f"btool/{c}.txt": t for c, t in spec.get("btool", {}).items()}
         members |= spec.get("files", {})

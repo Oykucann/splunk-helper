@@ -279,3 +279,34 @@ def test_redaction_marks_encrypted_vs_cleartext():
     out = r.conf_text(f"[a]\npassword = {ENC}\n[b]\npassword = hunter22\n")
     assert "password = <redacted:enc:" in out and "password = <redacted:plain:" in out
     assert "hunter22" not in out
+
+
+def test_service_detection(tmp_path, monkeypatch):
+    import shx.remote.collect_remote as remote
+    home = tmp_path / "opt" / "splunkforwarder"
+    write(home / "etc" / "splunk.version", "VERSION=9.2.1\nBUILD=abc\nPRODUCT=universalforwarder\nPLATFORM=Linux\n")
+    write(home / "var" / "run" / "splunk" / "splunkd.pid", "999999999\n")  # not a live pid
+    units = tmp_path / "etc" / "systemd" / "system"
+    write(units / "SplunkForwarder.service",
+          "[Service]\nExecStart=/opt/splunkforwarder/bin/splunk _internal_launch_under_systemd\n"
+          "User=splunkfwd\nLimitNOFILE=65536\nMemoryLimit=2G\n")
+    write(units / "SplunkForwarder.service.d" / "override.conf", "[Service]\nLimitNOFILE=100000\n")
+    (units / "multi-user.target.wants").mkdir(parents=True)
+    (units / "multi-user.target.wants" / "SplunkForwarder.service").write_text("")
+    write(units / "sshd.service", "[Service]\nExecStart=/usr/sbin/sshd\n")
+    monkeypatch.setattr(remote, "UNIT_DIRS", [str(units)])
+    monkeypatch.setattr(remote, "INSTALL_CANDIDATES", [])
+
+    info = remote.service_info(str(home))
+    [inst] = info["installs"]
+    assert (inst["product"], inst["version"], inst["running"]) == ("Universal Forwarder", "9.2.1", False)
+    [unit] = info["systemd_units"]
+    assert unit["unit"] == "SplunkForwarder.service" and unit["enabled"] is True
+    assert unit["settings"]["LimitNOFILE"] == "100000"  # drop-in overrides the unit
+    assert unit["settings"]["MemoryLimit"] == "2G" and unit["settings"]["User"] == "splunkfwd"
+    assert remote.service_info(str(tmp_path / "nothing"))["installs"] == []
+
+
+def test_manifest_contains_service(splunk_home):
+    _, manifest = open_snapshot(run_remote(splunk_home).stdout)
+    assert manifest["service"]["installs"][0]["version"] == "9.1.2"

@@ -1,34 +1,24 @@
 # Copy to environments/<name>.toml (gitignored) and fill in.
-name = "example-prod"
+name = "example"
 
-# VIPs (keepalived / haproxy). Collection refuses these; always use node addresses.
-vips = ["10.0.1.100", "10.0.2.100"]
+# VIPs (keepalived / haproxy). Never connected to; always use node addresses.
+vips = ["10.0.1.100"]
 
 [defaults]
 # ssh_user = "oyku"            # omit to use ~/.ssh/config
-run_as = "splunk"              # sudo -n -u <run_as>; set "" if ssh_user is already splunk
-splunk_home = "/data/splunk"
-# SSH login: "key" (default; agent/~/.ssh/config, or ssh_key) or "password" (ssh prompts per server).
-# ssh_auth = "password"
+# ssh_auth = "password"        # default "key"; "password" = ssh asks per server
 # ssh_key = "~/.ssh/lab.pem"
+run_as = "splunk"              # sudo -n -u <run_as>; "" if ssh_user is already the splunk user
+splunk_home = "/data/splunk"
 ssh_options = ["-o", "ConnectTimeout=10"]
 timeout_seconds = 900
-btool = true
-# Extra app-name patterns collected as local/ + metadata/ only (ES, built-ins are default).
-# local_only_apps = ["Splunk_TA_aws", "TA-big-vendor-*"]
 
 [[servers]]
 name = "sh01"
 host = "10.0.1.10"
-role = "sh"
+role = "sh"                    # sh, cm, ds, deployer, idx, hf, uf
 site = "site1"
-rest_token_env = "SHX_TOKEN_SITE1"   # read-only role token, see docs/readonly-role.md
-# Or username/password instead of a token (password from env var, else prompted; never stored):
-# rest_auth = "password"
-# rest_username = "shx_ro_user"
-# rest_password_env = "SHX_PW_SITE1"
-# also_roles = ["cm"]                 # lab only: this SH is also the cluster manager
-# rest_ca_file = "~/.shx/ca.pem"      # or rest_verify_tls = false for self-signed (lab)
+# also_roles = ["cm"]          # lab: this SH is also the cluster manager
 
 [[servers]]
 name = "ds01"
@@ -37,36 +27,23 @@ role = "ds"
 site = "site1"
 
 [[servers]]
-name = "cm01"
-host = "10.0.1.12"
-role = "cm"
-site = "site1"
-
-[[servers]]
-name = "idx01"                 # one indexer per site: effective indexes.conf + [cachemanager]
-host = "10.0.1.40"
-role = "idx"
-site = "site1"
-
-[[servers]]
-name = "hf-pull01"             # dedicated DBX / scripted input HF
-host = "10.0.1.30"
-role = "hf"
-site = "site1"
-
-[[servers]]
 name = "hf01a"
 host = "10.0.1.21"
 role = "hf"
 site = "site1"
-ha_group = "site1-push"
+ha_group = "site1-syslog"      # keepalived pair: collected last, one node at a time
 
 [[servers]]
 name = "hf01b"
 host = "10.0.1.22"
 role = "hf"
 site = "site1"
-ha_group = "site1-push"
-# This keepalived member also runs DB Connect / scripted inputs on its own address.
-# Declared apps are excluded from HA comparison; their inputs are reported once, as low.
-# pull_apps = ["splunk_app_db_connect", "TA-poll"]
+ha_group = "site1-syslog"
+
+[[servers]]
+name = "uf01"                  # universal forwarder: no bundled Python, host python3 is used
+host = "10.0.1.50"
+role = "uf"
+site = "site1"
+splunk_home = "/opt/splunkforwarder"
+run_as = "splunkfwd"           # UF 9.1+ default user

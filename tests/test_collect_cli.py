@@ -11,7 +11,7 @@ EXAMPLE = Path(__file__).resolve().parent.parent / "environments" / "example.tom
 def test_example_environment_loads_and_orders_ha_groups_last():
     env = load(EXAMPLE)
     order = [s.name for s in env.ordered()]
-    assert order == ["sh01", "cm01", "ds01", "idx01", "hf-pull01", "hf01a", "hf01b"]
+    assert order == ["sh01", "ds01", "uf01", "hf01a", "hf01b"]
 
 
 def test_vip_target_is_refused(tmp_path):
@@ -31,7 +31,7 @@ def test_unknown_keys_and_roles_rejected(tmp_path):
     p.write_text('name="e"\n[[servers]]\nname="x"\nhost="h"\nrole="hf"\nrestart=true\n')
     with pytest.raises(EnvironmentError_, match="unknown keys"):
         load(p)
-    p.write_text('name="e"\n[[servers]]\nname="x"\nhost="h"\nrole="uf"\n')
+    p.write_text('name="e"\n[[servers]]\nname="x"\nhost="h"\nrole="agent"\n')
     with pytest.raises(EnvironmentError_, match="role"):
         load(p)
 
@@ -65,9 +65,22 @@ def test_salt_not_on_command_line():
 def test_dry_run_prints_commands(capsys):
     assert cli.main([str(EXAMPLE), "--dry-run", "--only", "hf01a"]) == 0
     out = capsys.readouterr().out
-    assert "hf01a (hf, site1-push)" in out and "splunk cmd python3 -B -" in out
+    assert "hf01a (hf, site1-syslog)" in out and "splunk cmd python3 -B -" in out
 
 
 def test_local_only_patterns_passed_to_remote():
     s = Server(name="x", host="h", role="sh", local_only_apps=("TA-big *",))
     assert "--local-only-app 'TA-big *'" in cli.remote_command(s, check=False)
+
+
+def test_uf_uses_system_python_and_legacy_keys_are_ignored(tmp_path, capsys):
+    p = tmp_path / "e.toml"
+    p.write_text('name="e"\n[defaults]\nrest_verify_tls=false\n[[servers]]\nname="uf1"\nhost="h"\n'
+                 'role="uf"\nsplunk_home="/opt/splunkforwarder"\nrun_as="splunkfwd"\n'
+                 'rest_token_env="X"\n[[servers]]\nname="sh1"\nhost="h2"\nrole="sh"\n')
+    env = load(p)
+    assert "ignoring keys no longer used" in capsys.readouterr().err
+    uf, sh = env.servers
+    assert cli.remote_command(uf, check=False).startswith("sudo -n -u splunkfwd python3 -B - ")
+    assert "/bin/splunk cmd python3 -B -" in cli.remote_command(sh, check=False)
+    assert [s.name for s in env.ordered()] == ["sh1", "uf1"]

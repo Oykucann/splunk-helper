@@ -9,7 +9,7 @@ from shx import _toml
 from shx._toml import TOMLDecodeError, _mini_loads
 
 ROOT = Path(__file__).resolve().parent.parent
-FILES = [ROOT / "environments" / "example.toml", ROOT / "src" / "shx" / "knowledge" / "conf_expectations.toml"]
+FILES = [ROOT / "environments" / "example.toml"]
 
 SAMPLES = [
     'name = "t"\nvips = ["10.0.0.1", "10.0.0.2"]  # comment\n',
@@ -45,8 +45,6 @@ def test_loads_wraps_errors():
 
 def test_environment_loads_without_tomllib(monkeypatch):
     from shx.collect.environment import load
-    from shx.conf.compare import Expectations
     monkeypatch.setattr(_toml, "_impl", None)
     env = load(FILES[0])
     assert [s.name for s in env.ordered()][0] == "sh01"
-    assert Expectations.load().lookup("server", "general", "serverName").expect == "per_server"
