@@ -12,14 +12,15 @@ The tool **finds; it does not fix.** It never writes to, restarts or reloads a s
 | Command | Output |
 |---|---|
 | `shx-collect` | A redacted configuration snapshot per server, plus REST search results from the search heads |
-| `shx-inventory` | Per-server app and input inventory; suggested HA groups, VIPs and `pull_apps` from keepalived |
-| `shx-compare` | App and configuration comparison: inside HA groups, within a site, site1 ↔ site2 |
-| `shx-findings` | Findings ordered by severity (production risk, data integrity, retention, SHC blockers, security, …) |
+| `shx-report` | **Main output.** Four CSVs: apps per location (version/variant), differing app settings, non-stock instance settings, indexes per site ([SPEC-005](docs/specs/SPEC-005-report.md)) |
+| `shx-inventory` | Per-server input inventory; suggested HA groups, VIPs and `pull_apps` from keepalived |
+| `shx-findings` | Optional: rule-based findings with severities |
 
 ## Safety guarantees
 
-- Snapshots are taken by one script streamed over SSH to stdin (`splunk cmd python3 -`).
-  Nothing is installed or written on the server. Tests verify at AST level that the script
+- Snapshots are taken by one script streamed over SSH to stdin (`splunk cmd python3 -B -`).
+  Nothing is installed, written or left behind on the server (`-B`: no `.pyc` files either);
+  output is streamed back and the process exits. `btool` is run read-only. Tests verify at AST level that the script
   is read-only.
 - Passwords, tokens, `$7$` values and S3 keys are redacted **before leaving the server**. A
   per-run fingerprint is kept so identical secrets can still be compared.
@@ -74,13 +75,15 @@ RUN=$(ls -td snapshots/<env>/*/ | head -1)
 python3 -m shx.inventory.inventory_cli "$RUN"
 #    review reports/suggested_env.toml and add it to the environment file
 
-# 6. Comparison and findings (no recollection needed)
-python3 -m shx.inventory.cli "$RUN" --env environments/<env>.toml
+# 6. Decision report (no recollection needed)
+python3 -m shx.report.cli "$RUN" --env environments/<env>.toml
+
+# optional: rule-based findings
 python3 -m shx.rules.cli "$RUN" --env environments/<env>.toml
 ```
 
-After `pip install -e .` the same commands are available as `shx-collect`, `shx-inventory`,
-`shx-compare` and `shx-findings`.
+After `pip install -e .` the same commands are available as `shx-collect`, `shx-report`,
+`shx-inventory` and `shx-findings`.
 
 ## Environment file
 
@@ -111,8 +114,9 @@ Each collection lives in `snapshots/<env>/<run_id>/` (`run_id` is a UTC timestam
 | `<server>.stderr.log` | SSH-side errors and warnings |
 | `<sh>.rest.json` | Search head REST search results |
 | `reports/inventory.md`, `inputs.csv`, `apps.csv`, `suggested_env.toml` | Inventory |
-| `reports/comparison_report.md`, `conf_differences.csv`, `app_differences.csv` | Comparison |
-| `reports/findings.md`, `findings.csv`, `findings.json` | Findings |
+| `reports/apps.csv`, `app_settings.csv`, `system_settings.csv`, `indexes.csv`, `report.md` | Decision report |
+| `reports/inputs.csv`, `inventory.md`, `suggested_env.toml` | Input inventory |
+| `reports/findings.md`, `findings.csv`, `findings.json` | Optional findings |
 
 In findings, **proven** means backed by configuration or log evidence; **suspected** means
 inferred and should be verified before acting. Rules that could not run are listed as
@@ -124,8 +128,8 @@ Rule catalog: [SPEC-003](docs/specs/SPEC-003-rules.md).
 
 - [CONTEXT.md](CONTEXT.md) — domain terms (HA group, pull/push input, drift, …)
 - [docs/adr/](docs/adr/) — architectural decisions
-- [docs/specs/](docs/specs/) — SPEC-001 discovery and comparison, SPEC-002 REST, SPEC-003 rules,
-  SPEC-004 inventory workflow
+- [docs/specs/](docs/specs/) — SPEC-001 discovery, SPEC-002 REST, SPEC-003 rules,
+  SPEC-004 inventory workflow, SPEC-005 decision report
 
 ## Development
 

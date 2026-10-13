@@ -30,7 +30,8 @@ Remote collector: must run on Splunk's bundled Python (3.7+), stdlib only
 - `src/shx/remote/collect_remote.py` — single file streamed to targets over SSH
 - `src/shx/collect/` — `shx-collect` driver (runs on the engineer's machine); SH REST searches
 - `src/shx/transport/rest.py` — read-only REST client with request and SPL guards (SPEC-002)
-- `src/shx/conf/`, `src/shx/inventory/` — `shx-compare` (apps and effective config)
+- `src/shx/report/` — `shx-report`: the main CSV outputs (SPEC-005); no verdicts
+- `src/shx/conf/`, `src/shx/inventory/` — parsers, comparisons (legacy `shx-compare`)
 - `src/shx/inventory/inventory_cli.py` — `shx-inventory`: apps, inputs, suggested ha_group/vips/pull_apps (SPEC-004)
 - `src/shx/knowledge/` — data files (expected key relationships), no code
 - `src/shx/rules/` — `shx-findings`: one module per rule family, registered with `@rule` (SPEC-003)

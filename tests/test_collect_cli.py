@@ -46,7 +46,7 @@ def test_ssh_command_shape():
                ssh_options=("-o", "BatchMode=yes"))
     argv = cli.ssh_argv(s, check=False)
     assert argv[:5] == ["ssh", "-T", "-o", "BatchMode=yes", "oyku@10.0.1.21"]
-    assert argv[5] == "sudo -n -u splunk /data/splunk/bin/splunk cmd python3 - --splunk-home /data/splunk"
+    assert argv[5] == "sudo -n -u splunk /data/splunk/bin/splunk cmd python3 -B - --splunk-home /data/splunk"
     assert "--check" in cli.ssh_argv(s, check=True)[5]
 
 
@@ -65,7 +65,7 @@ def test_salt_not_on_command_line():
 def test_dry_run_prints_commands(capsys):
     assert cli.main([str(EXAMPLE), "--dry-run", "--only", "hf01a"]) == 0
     out = capsys.readouterr().out
-    assert "hf01a (hf, site1-push)" in out and "splunk cmd python3 -" in out
+    assert "hf01a (hf, site1-push)" in out and "splunk cmd python3 -B -" in out
 
 
 def test_local_only_patterns_passed_to_remote():

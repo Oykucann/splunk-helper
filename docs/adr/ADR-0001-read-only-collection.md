@@ -14,8 +14,10 @@ expensive. We need discovery data within one week, without a separate hardening 
 ## Decision
 
 1. **File-level data via SSH, streamed script.** `collect_remote.py` is piped to
-   `splunk cmd python3 -` over the operator's existing SSH access, as the splunk user.
-   Nothing is installed or written on the target. Output is a `tar.gz` on stdout.
+   `splunk cmd python3 -B -` over the operator's existing SSH access, as the splunk user.
+   Nothing is installed or written on the target, and nothing is left behind (`-B` prevents
+   `.pyc` files). Output is a `tar.gz` on stdout. Only OS/Splunk logging outside our control
+   (sshd/sudo auth logs, Splunk CLI utility log lines) records that a session happened.
 2. **The remote script is read-only by construction.** It may only read files, stat paths
    and run `splunk btool <conf> list --debug`. A test parses its AST and fails on any
    write-mode `open`, filesystem mutation, or subprocess call outside `_run_btool`.

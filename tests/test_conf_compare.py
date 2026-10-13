@@ -110,14 +110,14 @@ def test_normalize_booleans_and_whitespace():
 def test_expectations_file_loads_and_matches():
     e = Expectations.load()
     assert e.lookup("server", "general", "serverName").expect == "per_server"
-    assert e.lookup("server", "clustering", "pass4SymmKey").expect == "must_match"
+    assert e.lookup("server", "clustering", "pass4SymmKey").expect == "per_site"
     assert e.lookup("limits", "search", "anything").expect == "should_match"
 
 
 def test_cross_site_search_heads(run_dir):
     d = index(compare_all(load_run(run_dir)))
     key = lambda c, s, k: d.get(("cross_site", "sh", c, s, k))
-    assert key("server", "general", "pass4SymmKey").severity == "high"
+    assert key("server", "general", "pass4SymmKey").severity == "decision"  # no secret assumed shared
     assert key("server", "sslConfig", "sslVersions").values == {"site1": "tls1.2", "site2": "*,-ssl2"}
     assert key("server", "kvstore", "storageEngine").severity == "high"
     assert key("web", "settings", "httpport").severity == "high"

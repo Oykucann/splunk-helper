@@ -86,7 +86,7 @@ def tree_state(root: Path):
 
 def run_remote(home: Path, *extra, salt="s4lt"):
     proc = subprocess.run(
-        [sys.executable, "-", "--splunk-home", str(home), *extra],
+        [sys.executable, "-B", "-", "--splunk-home", str(home), *extra],
         input=script_payload(salt), capture_output=True, check=True,
     )
     return proc

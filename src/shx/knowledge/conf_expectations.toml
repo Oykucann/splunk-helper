@@ -44,8 +44,8 @@ expect = "per_site"
 conf = "server"
 stanza = "general|clustering|shclustering|indexer_discovery"
 key = "pass4SymmKey"
-expect = "must_match"
-note = "One multisite cluster / SHC needs one shared key."
+expect = "per_site"
+note = "Secrets legitimately differ between independent clusters/environments; unify only when joining them."
 
 [[rule]]
 conf = "server"
@@ -76,7 +76,7 @@ note = "Sites must trust each other's certificates and agree on TLS to form one 
 [[rule]]
 conf = "server"
 stanza = "kvstore"
-key = "storageEngine*|port|serverCert|sslPassword"
+key = "storageEngine*|port"
 expect = "must_match"
 note = "Mixed KV store engines/ports block an SHC."
 

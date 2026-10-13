@@ -13,7 +13,7 @@ Package generation, Docker lab, decision ledger, precedence engine, forced-comma
 
 ### Remote collector (`src/shx/remote/collect_remote.py`) — day 1
 
-Runs as `splunk cmd python3 - [args]`. Python 3.7 compatible, stdlib only.
+Runs as `splunk cmd python3 -B - [args]` (no `.pyc` written). Python 3.7 compatible, stdlib only.
 
 Streams a `tar.gz` to stdout containing:
 

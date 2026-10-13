@@ -2,7 +2,7 @@
 
 Streamed to a target over SSH and executed as:
 
-    splunk cmd python3 - --splunk-home /opt/splunk [--no-btool] [--check]
+    splunk cmd python3 -B - --splunk-home /data/splunk [--no-btool] [--check]
 
 READ-ONLY BY CONSTRUCTION (ADR-0001). This script must never create, modify or delete
 files on the target, and must never talk to splunkd. It reads files, stats paths and

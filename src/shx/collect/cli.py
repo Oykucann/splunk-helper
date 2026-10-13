@@ -37,7 +37,8 @@ def remote_command(server: Server, check: bool) -> str:
         args.append("--no-btool")
     for pattern in server.local_only_apps:
         args += ["--local-only-app", shlex.quote(pattern)]
-    cmd = f"{home}/bin/splunk cmd python3 - {' '.join(args)}"
+    # -B: never write __pycache__/*.pyc into Splunk's Python tree; nothing may be left behind.
+    cmd = f"{home}/bin/splunk cmd python3 -B - {' '.join(args)}"
     if server.run_as:
         cmd = f"sudo -n -u {shlex.quote(server.run_as)} {cmd}"
     return cmd
