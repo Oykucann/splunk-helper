@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from html import escape
 
-from shx.report.model import KIND_LABEL, Report
+from shx.report.model import KIND_LABEL, NOT_COLLECTED, UNSET, Report
 
 CSS = """
 :root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--hi:#fff4d6;--new:#e3f4e8;--head:#f5f5f7}
@@ -18,6 +18,9 @@ th,td{border:1px solid var(--line);padding:4px 8px;text-align:left;vertical-alig
 th{background:var(--head);position:sticky;top:0}td.hi{background:var(--hi)}td.new{background:var(--new)}
 details{margin:6px 0}summary{cursor:pointer;font-weight:600}code{font-size:12px}
 ul{margin:4px 0 8px 18px;padding:0}.wrap{overflow-x:auto}
+.srv{margin:8px 0 12px}pre{background:var(--head);border:1px solid var(--line);border-radius:6px;
+padding:8px 12px;margin:4px 0;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;
+word-break:break-word}
 """
 
 
@@ -63,20 +66,57 @@ def apps_section(r: Report) -> str:
     return "<h2>App'ler</h2>" + legend + _table(["App", "Tür", *r.server_names, "Splunkbase son sürüm"], rows)
 
 
+def _server_block(app, where: str) -> str | None:
+    """The differing settings one copy carries, written the way they look in the conf files."""
+    lines, files = [], []
+    by_file = defaultdict(lambda: defaultdict(list))
+    for d in app.diffs:
+        value = d.values.get(where)
+        if value in (None, UNSET, NOT_COLLECTED):
+            continue
+        if d.conf == "dosya":
+            files.append(f"{d.stanza}  ({value})")
+            continue
+        conf_file = "metadata/" + d.layers.get(where, "default") + ".meta" if d.conf == "metadata" \
+            else f"{d.layers.get(where, 'default')}/{d.conf}.conf"
+        by_file[conf_file][d.stanza].append(f"{d.key} = {value}")
+    for conf_file in sorted(by_file):
+        lines.append(conf_file)
+        for stanza, kvs in by_file[conf_file].items():
+            lines.append(f"  [{stanza}]")
+            lines += [f"  {kv}" for kv in kvs]
+        lines.append("")
+    if files:
+        lines += ["dosyalar (farklı içerik)"] + [f"  {f}" for f in files]
+    if not lines:
+        return None
+    return f"<div class=srv><b>{_e(where)}</b><pre>{_e(chr(10).join(lines).rstrip())}</pre></div>"
+
+
 def diffs_section(r: Report) -> str:
-    parts = ["<h2>App farkları</h2>"]
+    parts = ["<h2>App farkları</h2>",
+             '<p class="muted">Her sunucu için yalnızca diğerlerinden farklı olan ayarlar, conf dosyasındaki '
+             "haliyle. Splunk'ın kendi yazdığı alanlar (modtime, version, is_configured) gösterilmez.</p>"]
     apps = [a for a in r.apps if a.diffs]
     if not apps:
-        return parts[0] + "<p>Fark yok.</p>"
+        return "".join(parts) + "<p>Fark yok.</p>"
     for app in apps:
-        cols = [c.where for c in app.copies]
         notes = "".join(f"<li>{_e(n)}</li>" for n in app.notes)
-        rows = [f"<tr><td>{_e(d.conf)}</td><td>{_e(d.stanza)}</td><td>{_e(d.key)}</td>"
-                + "".join(f"<td>{_e(d.values.get(c, ''))}</td>" for c in cols) + "</tr>" for d in app.diffs]
+        blocks, empty, missing = [], [], []
+        for c in app.copies:
+            if any(d.values.get(c.where) == NOT_COLLECTED for d in app.diffs):
+                missing.append(c.where)
+                continue
+            block = _server_block(app, c.where)
+            (blocks.append(block) if block else empty.append(c.where))
+        tail = ""
+        if empty:
+            tail += f'<p class="muted">Bu ayarlar olmadan: {_e(", ".join(empty))}</p>'
+        if missing:
+            tail += f'<p class="muted">Detay alınamadı: {_e(", ".join(missing))}</p>'
         parts.append(f'<details id="app-{_e(app.name)}"><summary>{_e(app.name)} '
                      f'<span class="muted">({len(app.diffs)} fark)</span></summary>'
-                     + (f"<ul>{notes}</ul>" if notes else "")
-                     + _table(["Conf", "Stanza / dosya", "Key", *cols], rows) + "</details>")
+                     + (f"<ul>{notes}</ul>" if notes else "") + "".join(blocks) + tail + "</details>")
     return "".join(parts)
 
 

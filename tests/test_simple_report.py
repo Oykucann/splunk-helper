@@ -22,7 +22,12 @@ SERVERS = {
             "detail": [detail("Splunk_TA_windows", settings=[
                 ("default", "props", "WinEventLog", "TRUNCATE", "10000"),
                 ("local", "props", "WinEventLog", "KV_MODE", "none")], files=[("bin/run.ps1", "aaa")]),
-                detail("search", kind="builtin", settings=[("local", "savedsearches", "mine", "search", "index=a")])],
+                detail("search", kind="builtin", settings=[
+                    ("local", "savedsearches", "mine", "search", "index=a"),
+                    ("local", "metadata", "savedsearches/mine", "modtime", "1788787846.7"),
+                    ("local", "metadata", "savedsearches/mine", "version", "10.2.6"),
+                    ("local", "metadata", "savedsearches/mine", "owner", "admin"),
+                    ("local", "app", "install", "is_configured", "1")])],
             "btool": {"server": bt("etc/system/local/server.conf", "general", serverName="sh1",
                                    pass4SymmKey="<redacted:enc:aaa111>")
                       + bt("etc/system/default/server.conf", "kvstore", port="8191")
@@ -66,13 +71,15 @@ def test_model(tmp_path):
     assert win.versions == ["8.9.0", "9.0.0"] and not win.identical
     diffs = {(d.conf, d.stanza, d.key): d.values for d in win.diffs}
     assert diffs[("props", "WinEventLog", "TRUNCATE")] == {"sh1": "10000", "hf1": "20000"}
-    assert diffs[("props", "WinEventLog", "KV_MODE")] == {"sh1": "none (local)", "hf1": "—"}
+    assert diffs[("props", "WinEventLog", "KV_MODE")] == {"sh1": "none", "hf1": "—"}
+    kv = next(d for d in win.diffs if d.key == "KV_MODE")
+    assert kv.layers == {"sh1": "local"}
     assert diffs[("dosya", "bin/run.ps1", "")] == {"sh1": "aaa", "hf1": "bbb"}
     assert any(n.startswith("Farklı sürümler: 8.9.0 → sh1; 9.0.0 → hf1") for n in win.notes)
     assert apps["org_same"].identical and apps["org_same"].diffs == []
     search = apps["search"]
     assert search.kind == "builtin" and {c.letter for c in search.copies} == {"A"}  # same shipped content
-    assert {(d.stanza, d.key) for d in search.diffs} == {("mine", "search")}
+    assert {(d.stanza, d.key) for d in search.diffs} == {("mine", "search"), ("savedsearches/mine", "owner")}
     assert any("Splunk app: yalnızca local/" in n for n in search.notes)
     assert [a.name for a in r.apps][-1] == "search"  # Splunk's own apps listed last
 
@@ -126,3 +133,15 @@ def test_html_and_cli(tmp_path, monkeypatch):
 def test_render_escapes(tmp_path):
     servers = {"sh1": {"role": "sh", "site": "<b>x</b>", "service": SVC_NONE}}
     assert "<b>x</b>" not in render(build(make_run(tmp_path, servers)))
+
+
+def test_diffs_rendered_per_server_in_conf_form(tmp_path):
+    html = render(build(make_run(tmp_path, SERVERS)))
+    section = html.split("App farkları", 1)[1]
+    assert "<b>sh1</b><pre>default/props.conf\n  [WinEventLog]\n  TRUNCATE = 10000" in section
+    assert "local/props.conf\n  [WinEventLog]\n  KV_MODE = none" in section
+    assert "metadata/local.meta\n  [savedsearches/mine]\n  owner = admin" in section
+    blocks = "".join(x.split("</pre>")[0] for x in section.split("<pre>")[1:])
+    assert "modtime" not in blocks and "is_configured" not in blocks and "version =" not in blocks
+    assert "Bu ayarlar olmadan: hf1" in section  # hf1 has nothing for search: one line, no empty table
+    assert "<table" not in section.split("Sunucu ayarları")[0]

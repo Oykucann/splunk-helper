@@ -113,7 +113,17 @@ class SettingDiff:
     conf: str
     stanza: str
     key: str
-    values: dict[str, str]  # copy.where -> value
+    values: dict[str, str]  # copy.where -> value (UNSET / NOT_COLLECTED when it has none)
+    layers: dict[str, str] = field(default_factory=dict)  # copy.where -> default | local
+
+
+# Written by Splunk itself (UI saves, app install), never by hand: not shown as differences.
+NOISE_KEYS = (("metadata", "*", "modtime"), ("metadata", "*", "version"),
+              ("app", "install", "is_configured"))
+
+
+def is_noise(conf: str, stanza: str, key: str) -> bool:
+    return any(conf == c and fnmatch.fnmatchcase(stanza, s) and key == k for c, s, k in NOISE_KEYS)
 
 
 @dataclass
@@ -175,18 +185,19 @@ def build_apps(snaps: list[ServerSnapshot], exclude=()) -> list[App]:
         details = {c.where: by_name[c.server].app_detail(c.root, app.name) for c in app.copies}
         settings = {w: _settings(d) for w, d in details.items()}
         for conf, stanza, key in sorted({k for v in settings.values() if v for k in v}):
-            values = {}
+            if is_noise(conf, stanza, key):
+                continue
+            values, layers = {}, {}
             for w, st in settings.items():
-                if st is None:
-                    values[w] = NOT_COLLECTED
-                else:
-                    hit = st.get((conf, stanza, key))
-                    values[w] = UNSET if hit is None else hit[0] + (" (local)" if hit[1] == "local" else "")
-            if len(set(values.values())) > 1:
-                app.diffs.append(SettingDiff(conf, stanza, key, label_secrets(values)))
+                hit = None if st is None else st.get((conf, stanza, key))
+                values[w] = NOT_COLLECTED if st is None else (UNSET if hit is None else hit[0])
+                if hit is not None:
+                    layers[w] = hit[1]
+            if len({(values[w], layers.get(w)) for w in values}) > 1:
+                app.diffs.append(SettingDiff(conf, stanza, key, label_secrets(values), layers))
         files = {w: {rel: sha for rel, sha in (d or {}).get("files", [])} for w, d in details.items()}
         for rel in sorted({f for v in files.values() for f in v}):
-            values = {w: v.get(rel, "yok") for w, v in files.items()}
+            values = {w: v.get(rel, UNSET) for w, v in files.items()}
             if len(set(values.values())) > 1:
                 app.diffs.append(SettingDiff("dosya", rel, "", values))
         app.notes = _notes(app, details)
