@@ -10,7 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from shx.apps import signature
+from shx.apps import is_excluded, signature
 from shx.conf.btool import parse as parse_btool
 from shx.snapshot import ServerSnapshot, load_run
 
@@ -153,11 +153,13 @@ def _settings(detail: dict | None) -> dict[tuple, tuple[str, str]] | None:
     return merged
 
 
-def build_apps(snaps: list[ServerSnapshot]) -> list[App]:
+def build_apps(snaps: list[ServerSnapshot], exclude=()) -> list[App]:
     apps: dict[str, App] = {}
     by_name = {s.name: s for s in snaps}
     for s in snaps:
         for a in s.apps:
+            if is_excluded(a["name"], exclude):
+                continue
             app = apps.setdefault(a["name"], App(a["name"]))
             app.copies.append(AppCopy(s.name, a["root"], a.get("version") or "sürüm yok", a.get("kind", "custom"),
                                       local_files=a.get("local_files") or 0, disabled=bool(a.get("disabled")),
@@ -238,7 +240,12 @@ def excluded(conf: str, stanza: str) -> bool:
     return any(fnmatch.fnmatchcase(stanza, p) for p in EXCLUDED_STANZAS.get(conf, ()))
 
 
-def build_system(snaps: list[ServerSnapshot]) -> list[SystemRow]:
+def _source_app(path: str) -> str | None:
+    parts = path.split("/")
+    return parts[2] if len(parts) > 3 and parts[0] == "etc" and parts[1] != "system" else None
+
+
+def build_system(snaps: list[ServerSnapshot], exclude=()) -> list[SystemRow]:
     btool = {s.name: {conf: parse_btool(text) for conf, text in (s.summary.get("btool") or {}).items()}
              for s in snaps}
     custom = set()
@@ -247,7 +254,8 @@ def build_system(snaps: list[ServerSnapshot]) -> list[SystemRow]:
             for stanza, kv in confs.get(conf, {}).items():
                 if excluded(conf, stanza):
                     continue
-                custom |= {(conf, stanza, k) for k, v in kv.items() if not v.is_system_default}
+                custom |= {(conf, stanza, k) for k, v in kv.items() if not v.is_system_default
+                           and not is_excluded(_source_app(v.source) or "", exclude)}
     rows = []
     for conf, stanza, key in sorted(custom):
         values, sources = {}, {}
@@ -257,6 +265,9 @@ def build_system(snaps: list[ServerSnapshot]) -> list[SystemRow]:
                 values[s.name] = "toplanmadı"
                 continue
             setting = confs[conf].get(stanza, {}).get(key)
+            if setting is not None and is_excluded(_source_app(setting.source) or "", exclude):
+                values[s.name] = "hariç app"
+                continue
             values[s.name] = UNSET if setting is None else " ".join(setting.value.split())
             if setting is not None and not setting.is_system_default:
                 sources[s.name] = _source(setting.source)
@@ -274,10 +285,16 @@ class Report:
     server_names: list[str]
     apps: list[App]
     system: list[SystemRow]
+    exclude_apps: tuple[str, ...] = ()
 
 
 def build(run_dir: str | Path, env_path: str | Path | None = None) -> Report:
     run = json.loads((Path(run_dir) / "run.json").read_text())
     snaps = load_run(run_dir, env_path)
+    exclude = tuple(run.get("exclude_apps") or ())
+    if env_path:  # the current environment file wins, so exclusions apply without recollecting
+        from shx.collect.environment import load as load_env
+        exclude = load_env(env_path).exclude_apps
     return Report(run.get("environment", ""), run.get("run_id", ""), server_rows(snaps),
-                  [s.name for s in snaps], build_apps(snaps), build_system(snaps))
+                  [s.name for s in snaps], build_apps(snaps, exclude), build_system(snaps, exclude),
+                  exclude)

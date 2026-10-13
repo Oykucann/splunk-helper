@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 from collections import defaultdict
 
 
@@ -10,12 +11,18 @@ def signature(app: dict) -> tuple:
     return (app.get("version"), app.get("content_fp"), app.get("local_fp"))
 
 
-def differing_apps(summaries: dict[str, dict]) -> dict[str, list[str]]:
-    """server -> ["root/name", ...] for every copy of an app whose copies are not all identical."""
+def is_excluded(name: str, patterns) -> bool:
+    return any(fnmatch.fnmatchcase(name, p) for p in patterns or ())
+
+
+def differing_apps(summaries: dict[str, dict], exclude=()) -> dict[str, list[str]]:
+    """server -> ["root/name", ...] for every copy of an app whose copies are not all identical.
+    Apps matching `exclude` are never asked for."""
     copies = defaultdict(list)  # app name -> [(server, app dict)]
     for server, summary in summaries.items():
         for app in summary.get("apps", []):
-            copies[app["name"]].append((server, app))
+            if not is_excluded(app["name"], exclude):
+                copies[app["name"]].append((server, app))
     wanted = defaultdict(list)
     for name, items in copies.items():
         if len(items) > 1 and len({signature(a) for _s, a in items}) > 1:

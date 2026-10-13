@@ -4,6 +4,9 @@ name = "example"
 # VIPs (keepalived / haproxy). Never connected to; always use node addresses.
 vips = ["10.0.1.100"]
 
+# App name patterns to leave out entirely (no detail collected, not in the report).
+# exclude_apps = ["*_sync"]
+
 [defaults]
 # ssh_user = "oyku"            # omit to use ~/.ssh/config
 # ssh_auth = "password"        # default "key"; "password" = ssh asks per server

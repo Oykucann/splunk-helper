@@ -103,5 +103,6 @@ def system_section(r: Report) -> str:
 def render(r: Report) -> str:
     return ("<!doctype html><html lang=tr><meta charset=utf-8><meta name=viewport content='width=device-width'>"
             f"<title>Splunk raporu — {_e(r.environment)}</title><style>{CSS}</style><body>"
-            f"<h1>Splunk raporu — {_e(r.environment)}</h1><p class=muted>Toplama: {_e(r.run_id)}</p>"
+            f"<h1>Splunk raporu — {_e(r.environment)}</h1><p class=muted>Toplama: {_e(r.run_id)}"
+            + (f" · Hariç tutulan app'ler: {_e(', '.join(r.exclude_apps))}" if r.exclude_apps else "") + "</p>"
             + servers_section(r) + apps_section(r) + diffs_section(r) + system_section(r) + "</body></html>")

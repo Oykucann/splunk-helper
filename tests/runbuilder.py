@@ -28,8 +28,8 @@ def detail(name, root="apps", kind="custom", settings=(), files=()):
             "files": [list(f) for f in files]}
 
 
-def make_run(tmp: Path, servers: dict, env="test") -> Path:
-    run = {"environment": env, "run_id": "r1", "servers": {}}
+def make_run(tmp: Path, servers: dict, env="test", exclude_apps=()) -> Path:
+    run = {"environment": env, "run_id": "r1", "servers": {}, "exclude_apps": list(exclude_apps)}
     for name, spec in servers.items():
         summary = {"hostname": name, "apps": spec.get("apps", []), "btool": spec.get("btool", {}),
                    "service": spec.get("service", {}), "errors": spec.get("errors", [])}

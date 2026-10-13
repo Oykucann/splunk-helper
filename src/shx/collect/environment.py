@@ -60,6 +60,8 @@ class Environment:
     name: str
     servers: tuple[Server, ...]
     vips: frozenset[str] = field(default_factory=frozenset)
+    # App name patterns left out of collection detail and the report (environment-specific).
+    exclude_apps: tuple[str, ...] = ()
 
     def ordered(self, only: set[str] | None = None) -> list[Server]:
         if only:
@@ -130,7 +132,11 @@ def load(path: str | Path) -> Environment:
             m["run_as"] = None
         servers.append(Server(**m))
 
-    env = Environment(name=name, servers=tuple(servers), vips=frozenset(data.get("vips", [])))
+    exclude = data.get("exclude_apps", [])
+    if not isinstance(exclude, list) or not all(isinstance(x, str) for x in exclude):
+        raise EnvironmentError_("exclude_apps must be a list of app name patterns")
+    env = Environment(name=name, servers=tuple(servers), vips=frozenset(data.get("vips", [])),
+                      exclude_apps=tuple(exclude))
     for server in env.servers:
         if is_vip(server.host, env.vips):
             raise EnvironmentError_(f"server {server.name!r} host {server.host!r} is a VIP; use the node's own address")

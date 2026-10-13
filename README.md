@@ -62,6 +62,7 @@ Splunkbase, or `--env environments/<env>.toml` to relabel roles and sites withou
 | Field | Meaning |
 |---|---|
 | `name`, `vips` | Environment name (snapshot folder) and the VIPs that must never be targeted |
+| `exclude_apps` | App name patterns to leave out entirely, e.g. `["*dac_sync"]`: no detail collected, not in the report, their settings hidden from btool |
 | `[[servers]]` `name`, `host`, `role`, `site` | `role`: `sh`, `cm`, `ds`, `deployer`, `idx`, `hf`, `uf` |
 | `ha_group` | keepalived/haproxy members; collected last, one at a time |
 | `also_roles` | Extra roles on one instance (e.g. a lab SH that is also the CM) |

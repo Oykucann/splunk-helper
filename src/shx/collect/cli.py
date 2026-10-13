@@ -127,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     run = {
         "environment": env.name, "run_id": run_id,
         "remote_script_sha256": hashlib.sha256(REMOTE_SCRIPT.read_bytes()).hexdigest(),
+        "exclude_apps": list(env.exclude_apps),
         "servers": {s.name: {"role": s.role, "site": s.site, "ha_group": s.ha_group, "host": s.host,
                              "also_roles": list(s.also_roles)} for s in servers},
     }
@@ -154,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
             log(s.name, f"FAILED: {r['error']}")
         save()
 
-    wanted = differing_apps(summaries)
+    wanted = differing_apps(summaries, env.exclude_apps)
     by_name = {s.name: s for s in servers}
     for name in [s.name for s in servers if s.name in wanted]:  # phase 2, same order
         s = by_name[name]
