@@ -25,7 +25,9 @@ SERVERS = {
                 detail("search", kind="builtin", settings=[("local", "savedsearches", "mine", "search", "index=a")])],
             "btool": {"server": bt("etc/system/local/server.conf", "general", serverName="sh1",
                                    pass4SymmKey="<redacted:enc:aaa111>")
-                      + bt("etc/system/default/server.conf", "kvstore", port="8191"),
+                      + bt("etc/system/default/server.conf", "kvstore", port="8191")
+                      + bt("etc/system/local/server.conf", "lmpool:auto_generated_pool_enterprise", quota="MAX")
+                      + bt("etc/system/local/server.conf", "introspection:generator:disk_objects", acquireExtra_i_data="true"),
                       "web": bt("etc/system/local/web.conf", "settings", httpport="8000")}},
     "hf1": {"role": "hf", "site": "site1", "service": SVC_ENT,
             "apps": [app("Splunk_TA_windows", "9.0.0", content="B"), app("org_same", None),
@@ -79,6 +81,7 @@ def test_model(tmp_path):
     assert {p4.values["sh1"], p4.values["hf1"]} == {"secret#1", "secret#2"} and p4.differs
     assert p4.values["box9"] == "toplanmadı"
     assert ("server", "kvstore", "port") not in sysrows  # stock default, not shown
+    assert not [k for k in sysrows if k[1].startswith(("lmpool:", "introspection:"))]  # excluded noise
     assert sysrows[("web", "settings", "httpport")].sources == {"sh1": "system/local"}
 
 

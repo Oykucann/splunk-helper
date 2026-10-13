@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import string
@@ -15,6 +16,11 @@ from shx.snapshot import ServerSnapshot, load_run
 
 SYSTEM_CONFS = ("server", "web", "outputs", "deploymentclient", "distsearch", "limits",
                 "authentication", "authorize", "health", "alert_actions")
+# Stanzas Splunk writes or manages itself and nobody edits by hand; hidden from the
+# server settings section (conf -> fnmatch patterns). Extend here when something else is noise.
+EXCLUDED_STANZAS = {
+    "server": ("lmpool:*", "introspection:*"),
+}
 UNIT_LIMIT_KEYS = ("LimitNOFILE", "LimitNPROC", "LimitCORE", "LimitFSIZE", "LimitDATA", "LimitAS",
                    "MemoryLimit", "MemoryMax", "MemoryHigh", "CPUQuota", "CPUShares", "CPUWeight",
                    "TasksMax", "User")
@@ -228,6 +234,10 @@ def _source(path: str) -> str:
     return "/".join(parts[1:3]) if len(parts) > 3 else path
 
 
+def excluded(conf: str, stanza: str) -> bool:
+    return any(fnmatch.fnmatchcase(stanza, p) for p in EXCLUDED_STANZAS.get(conf, ()))
+
+
 def build_system(snaps: list[ServerSnapshot]) -> list[SystemRow]:
     btool = {s.name: {conf: parse_btool(text) for conf, text in (s.summary.get("btool") or {}).items()}
              for s in snaps}
@@ -235,6 +245,8 @@ def build_system(snaps: list[ServerSnapshot]) -> list[SystemRow]:
     for confs in btool.values():
         for conf in SYSTEM_CONFS:
             for stanza, kv in confs.get(conf, {}).items():
+                if excluded(conf, stanza):
+                    continue
                 custom |= {(conf, stanza, k) for k, v in kv.items() if not v.is_system_default}
     rows = []
     for conf, stanza, key in sorted(custom):
