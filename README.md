@@ -67,6 +67,7 @@ Splunkbase, or `--env environments/<env>.toml` to relabel roles and sites withou
 | `ha_group` | keepalived/haproxy members; collected last, one at a time |
 | `also_roles` | Extra roles on one instance (e.g. a lab SH that is also the CM) |
 | `ssh_user`, `ssh_auth`, `ssh_key`, `ssh_options`, `run_as` | How to log in |
+| `ssh_destination` | SSH target template with `{host}` and `{user}`, e.g. `"me@{user}@{host}@gateway.example.local"` |
 | `splunk_home` | Default `/data/splunk`; e.g. `/opt/splunkforwarder` for UFs |
 | `python` | `splunk` (default) or `system` (default for `uf`) |
 | `local_only_apps` | Extra vendor apps to compare by `local/` only (ES and Splunk's own apps already are) |

@@ -11,6 +11,8 @@ vips = ["10.0.1.100"]
 # ssh_user = "oyku"            # omit to use ~/.ssh/config
 # ssh_auth = "password"        # default "key"; "password" = ssh asks per server
 # ssh_key = "~/.ssh/lab.pem"
+# ssh_user = "splunk"                                    # {user}
+# ssh_destination = "me@{user}@{host}@gateway.example.local"   # {host} = server host
 run_as = "splunk"              # sudo -n -u <run_as>; "" if ssh_user is already the splunk user
 splunk_home = "/data/splunk"
 ssh_options = ["-o", "ConnectTimeout=10"]

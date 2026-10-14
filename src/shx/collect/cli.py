@@ -57,8 +57,14 @@ def ssh_auth_options(server: Server) -> list[str]:
     return opts
 
 
+def ssh_destination(server: Server) -> str:
+    if server.ssh_destination:
+        return server.ssh_destination.format(host=server.host, user=server.ssh_user or "")
+    return f"{server.ssh_user}@{server.host}" if server.ssh_user else server.host
+
+
 def ssh_argv(server: Server, mode: str = "summary", apps: list[str] = ()) -> list[str]:
-    target = f"{server.ssh_user}@{server.host}" if server.ssh_user else server.host
+    target = ssh_destination(server)
     return ["ssh", "-T", *ssh_auth_options(server), *server.ssh_options, target,
             remote_command(server, mode, apps)]
 

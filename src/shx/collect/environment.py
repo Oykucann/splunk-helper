@@ -29,6 +29,9 @@ class Server:
     ssh_user: str | None = None
     ssh_auth: str = "key"            # "key" (agent/~/.ssh/config or ssh_key) | "password" (ssh prompts)
     ssh_key: str | None = None
+    # SSH destination template; {host} and {user} (ssh_user) are filled in. Default is
+    # "{user}@{host}" or "{host}"; e.g. "me@{user}@{host}@gateway.example.local".
+    ssh_destination: str | None = None
     ssh_options: tuple[str, ...] = ()
     run_as: str | None = "splunk"
     splunk_home: str = "/data/splunk"
@@ -79,6 +82,7 @@ class EnvironmentError_(ValueError):
 _SERVER_KEYS = {
     "name", "host", "role", "site", "ha_group", "ssh_user", "ssh_auth", "ssh_key", "ssh_options",
     "run_as", "splunk_home", "python", "timeout_seconds", "btool", "local_only_apps", "also_roles",
+    "ssh_destination",
 }
 _SERVER_ONLY_KEYS = {"name", "host", "role", "site", "ha_group", "also_roles"}
 
@@ -120,6 +124,9 @@ def load(path: str | Path) -> Environment:
             raise EnvironmentError_(f"{label}: ssh_auth must be key or password")
         if m.get("ssh_auth") == "password" and "BatchMode=yes" in m.get("ssh_options", []):
             raise EnvironmentError_(f"{label}: remove BatchMode=yes from ssh_options to use ssh_auth = password")
+        dest = m.get("ssh_destination")
+        if dest is not None and ("{host}" not in dest or ("{user}" in dest and not m.get("ssh_user"))):
+            raise EnvironmentError_(f"{label}: ssh_destination needs {{host}} (and ssh_user when it uses {{user}})")
         if m.get("python") not in (None, "splunk", "system"):
             raise EnvironmentError_(f"{label}: python must be splunk or system")
         extra = list(m.get("also_roles", []))

@@ -110,3 +110,25 @@ def test_two_phases_detail_only_where_copies_differ(tmp_path, monkeypatch):
     run = json.loads((run_dir / "run.json").read_text())
     assert run["servers"]["hf2"].get("detail") is None and run["servers"]["sh1"]["detail"] == "sh1.detail.json"
     assert not list(run_dir.glob("*.tar.gz"))
+
+
+def test_destination_template(tmp_path):
+    p = tmp_path / "e.toml"
+    p.write_text('name="e"\nvips=["10.0.1.100"]\n[defaults]\nssh_auth="password"\nssh_user="splunk"\nrun_as=""\n'
+                 'ssh_destination="me@{user}@{host}@gateway.example.local"\n'
+                 '[[servers]]\nname="hf1"\nhost="10.0.1.21"\nrole="hf"\n')
+    [s] = load(p).servers
+    argv = cli.ssh_argv(s)
+    assert argv[-2] == "me@splunk@10.0.1.21@gateway.example.local"
+    assert "BatchMode=yes" not in argv and not argv[-1].startswith("sudo")
+    # The VIP guard still applies to the real target address inside the template.
+    p.write_text(p.read_text().replace('host="10.0.1.21"', 'host="10.0.1.100"'))
+    with pytest.raises(EnvironmentError_, match="VIP"):
+        load(p)
+
+
+def test_destination_template_validated(tmp_path):
+    p = tmp_path / "e.toml"
+    p.write_text('name="e"\n[[servers]]\nname="x"\nhost="h"\nrole="hf"\nssh_destination="a@gateway"\n')
+    with pytest.raises(EnvironmentError_, match="ssh_destination"):
+        load(p)
