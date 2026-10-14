@@ -35,7 +35,7 @@ APP_ROOTS = ["apps", "peer-apps", "slave-apps", "deployment-apps", "manager-apps
 
 # Instance-level confs read through btool (small; never props/savedsearches).
 SYSTEM_CONFS = ["server", "web", "outputs", "deploymentclient", "distsearch", "limits",
-                "authentication", "authorize", "health", "alert_actions"]
+                "authentication", "authorize", "health", "alert_actions", "serverclass"]
 
 # Large vendor apps: only local/ is compared. Splunk's own apps are found from the install
 # manifest (builtin_apps); FALLBACK_BUILTIN is used only when no manifest exists.
@@ -297,14 +297,7 @@ def install_info(home):
             info["run_user"] = owner_name(os.stat("/proc/" + pid).st_uid)
         except OSError:
             pass
-        limits = {}
-        for line in (read_text_or_none("/proc/%s/limits" % pid) or "").splitlines():
-            for name in PROC_LIMITS:
-                if line.startswith(name):
-                    parts = line[len(name):].split()
-                    if len(parts) >= 2:
-                        limits[name] = {"soft": parts[0], "hard": parts[1]}
-        info["process_limits"] = limits
+        info["process_limits"] = parse_limits(read_text_or_none("/proc/%s/limits" % pid))
     return info
 
 
@@ -346,6 +339,97 @@ def splunk_units():
             units.append({"unit": name, "path": path, "dropins": dropins, "enabled": enabled,
                           "settings": unit_settings(texts)})
     return units
+
+
+def parse_limits(text):
+    limits = {}
+    for line in (text or "").splitlines():
+        for name in PROC_LIMITS:
+            if line.startswith(name):
+                parts = line[len(name):].split()
+                if len(parts) >= 2:
+                    limits[name] = {"soft": parts[0], "hard": parts[1]}
+    return limits
+
+
+# --- operating system (file reads only) ---------------------------------------------
+
+THP_DIRS = ["/sys/kernel/mm/transparent_hugepage", "/sys/kernel/mm/redhat_transparent_hugepage"]
+NTP_FILES = ["/etc/chrony.conf", "/etc/chrony/chrony.conf", "/etc/ntp.conf",
+             "/etc/systemd/timesyncd.conf"]
+RESOLV_FILES = ["/etc/resolv.conf", "/run/systemd/resolve/resolv.conf"]
+SELINUX_ENFORCE = "/sys/fs/selinux/enforce"
+SELINUX_CONFIG = "/etc/selinux/config"
+OS_RELEASE = "/etc/os-release"
+
+
+def _bracketed(text):
+    """'always madvise [never]' -> 'never'."""
+    m = re.search(r"\[([^\]]+)\]", text or "")
+    return m.group(1) if m else (text or None)
+
+
+def ntp_servers():
+    out = []
+    for path in NTP_FILES:
+        for line in (read_text_or_none(path) or "").splitlines():
+            line = line.split("#", 1)[0].strip()
+            words = line.split()
+            if words and words[0] in ("server", "pool", "peer"):
+                out.append({"file": path, "type": words[0], "server": words[1] if len(words) > 1 else ""})
+            elif line.startswith(("NTP=", "FallbackNTP=")):
+                for srv in line.split("=", 1)[1].split():
+                    out.append({"file": path, "type": line.split("=", 1)[0], "server": srv})
+    return out
+
+
+def dns_info():
+    out = {}
+    for path in RESOLV_FILES:
+        text = read_text_or_none(path)
+        if text is None:
+            continue
+        servers, search = [], []
+        for line in text.splitlines():
+            words = line.split("#", 1)[0].split()
+            if len(words) > 1 and words[0] == "nameserver":
+                servers.append(words[1])
+            elif words and words[0] in ("search", "domain"):
+                search += words[1:]
+        out[path] = {"nameservers": servers, "search": search}
+    return out
+
+
+def meminfo_mb():
+    for line in (read_text_or_none("/proc/meminfo") or "").splitlines():
+        if line.startswith("MemTotal:"):
+            try:
+                return int(line.split()[1]) // 1024
+            except (IndexError, ValueError):
+                return None
+    return None
+
+
+def os_info():
+    release = parse_kv_file(read_text_or_none(OS_RELEASE))
+    enforce = read_text_or_none(SELINUX_ENFORCE)
+    selinux_config = parse_kv_file(read_text_or_none(SELINUX_CONFIG))
+    thp = {}
+    for d in THP_DIRS:
+        if os.path.isdir(d):
+            thp = {"enabled": _bracketed(read_text_or_none(os.path.join(d, "enabled"))),
+                   "defrag": _bracketed(read_text_or_none(os.path.join(d, "defrag"))), "path": d}
+            break
+    return {
+        "os": release.get("PRETTY_NAME", "").strip('"') or None,
+        "kernel": read_text_or_none("/proc/sys/kernel/osrelease"),
+        "cpus": os.cpu_count(), "memory_mb": meminfo_mb(),
+        "selinux": {"current": {"1": "enforcing", "0": "permissive"}.get(enforce or "", "disabled"),
+                    "config": selinux_config.get("SELINUX")},
+        "thp": thp,
+        "session_limits": parse_limits(read_text_or_none("/proc/self/limits")),
+        "ntp": ntp_servers(), "dns": dns_info(),
+    }
 
 
 def service_info(splunk_home):
@@ -487,7 +571,7 @@ def summary(splunk_home, salt, extra_vendor, btool):
         "splunk_version": read_text_or_none(os.path.join(splunk_home, "etc", "splunk.version")),
         "splunk_secret_fp": sha256_file(secret)[:16] if os.path.isfile(secret) else None,
         "builtin_source": classifier.manifest or "fallback list",
-        "service": service_info(splunk_home), "apps": apps, "btool": btool_out,
+        "service": service_info(splunk_home), "os": os_info(), "apps": apps, "btool": btool_out,
         "redactions": redactor.count, "errors": errors, "seconds": round(time.time() - started, 1),
     }
 
@@ -513,7 +597,7 @@ def check(splunk_home):
         "splunk_version": read_text_or_none(os.path.join(splunk_home, "etc", "splunk.version")),
         "btool_present": os.access(os.path.join(splunk_home, "bin", "splunk"), os.X_OK),
         "apps_readable": os.access(os.path.join(splunk_home, "etc", "apps"), os.R_OK | os.X_OK),
-        "service": service_info(splunk_home),
+        "service": service_info(splunk_home), "os": os_info(),
     }
 
 

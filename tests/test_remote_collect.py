@@ -104,7 +104,7 @@ def test_summary_sends_fingerprints_not_files(splunk_home):
 def test_summary_btool_is_redacted_and_limited_to_system_confs(splunk_home):
     _, s = run_remote(splunk_home, "--summary")
     assert set(s["btool"]) == {"server", "web", "outputs", "deploymentclient", "distsearch", "limits",
-                               "authentication", "authorize", "health", "alert_actions"}
+                               "authentication", "authorize", "health", "alert_actions", "serverclass"}
     assert "serverName = hf01a" in s["btool"]["server"]
     assert "$7$" not in s["btool"]["server"] and "<redacted:enc:" in s["btool"]["server"]
 
@@ -190,3 +190,39 @@ def test_builtin_fallback_without_manifest(tmp_path):
 
 def test_remote_script_is_self_contained():
     assert "from shx" not in REMOTE_SCRIPT.read_text()
+
+
+def test_os_info_from_files(tmp_path, monkeypatch):
+    import shx.remote.collect_remote as remote
+    write(tmp_path / "selinux" / "enforce", "1\n")
+    write(tmp_path / "selinux" / "config", "SELINUX=enforcing\nSELINUXTYPE=targeted\n")
+    write(tmp_path / "os-release", 'PRETTY_NAME="Red Hat Enterprise Linux 8.9 (Ootpa)"\n')
+    thp = tmp_path / "thp"
+    write(thp / "enabled", "always madvise [never]\n")
+    write(thp / "defrag", "[always] defer madvise never\n")
+    write(tmp_path / "chrony.conf", "# pool 2.rhel.pool.ntp.org iburst\nserver 10.0.0.1 iburst\npool ntp.corp prefer\n")
+    write(tmp_path / "timesyncd.conf", "[Time]\nNTP=10.0.0.2 10.0.0.3\n")
+    write(tmp_path / "resolv.conf", "search corp.local\nnameserver 10.0.0.53\nnameserver 10.0.0.54\n")
+    monkeypatch.setattr(remote, "SELINUX_ENFORCE", str(tmp_path / "selinux" / "enforce"))
+    monkeypatch.setattr(remote, "SELINUX_CONFIG", str(tmp_path / "selinux" / "config"))
+    monkeypatch.setattr(remote, "OS_RELEASE", str(tmp_path / "os-release"))
+    monkeypatch.setattr(remote, "THP_DIRS", [str(thp)])
+    monkeypatch.setattr(remote, "NTP_FILES", [str(tmp_path / "chrony.conf"), str(tmp_path / "timesyncd.conf")])
+    monkeypatch.setattr(remote, "RESOLV_FILES", [str(tmp_path / "resolv.conf")])
+
+    o = remote.os_info()
+    assert o["os"] == "Red Hat Enterprise Linux 8.9 (Ootpa)"
+    assert o["selinux"] == {"current": "enforcing", "config": "enforcing"}
+    assert (o["thp"]["enabled"], o["thp"]["defrag"]) == ("never", "always")
+    assert [n["server"] for n in o["ntp"]] == ["10.0.0.1", "ntp.corp", "10.0.0.2", "10.0.0.3"]
+    assert o["dns"][str(tmp_path / "resolv.conf")] == {"nameservers": ["10.0.0.53", "10.0.0.54"],
+                                                       "search": ["corp.local"]}
+    assert o["cpus"] and isinstance(o["session_limits"], dict)
+
+    monkeypatch.setattr(remote, "SELINUX_ENFORCE", str(tmp_path / "missing"))
+    assert remote.os_info()["selinux"]["current"] == "disabled"
+
+
+def test_summary_contains_os(splunk_home):
+    _, s = run_remote(splunk_home, "--summary")
+    assert "selinux" in s["os"] and "thp" in s["os"] and "dns" in s["os"]

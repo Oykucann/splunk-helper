@@ -41,6 +41,20 @@ def servers_section(r: Report) -> str:
         ["Sunucu", "Rol", "Site", "Ürün", "Sürüm", "Durum", "Servis", "Limitler"], rows)
 
 
+def os_section(r: Report) -> str:
+    rows = []
+    for o in r.os:
+        thp = f'<td class=hi>{_e(o.thp)}</td>' if not o.thp_off else f"<td>{_e(o.thp)}</td>"
+        lim = f"{o.limits} ({o.limits_source})" if o.limits else ""
+        lim = f'<td class=hi>{_e(lim)}</td>' if not o.limits_ok else f"<td>{_e(lim)}</td>"
+        rows.append(f"<tr><td>{_e(o.name)}</td><td>{_e(o.os)}</td><td>{_e(o.kernel)}</td><td>{_e(o.hardware)}</td>"
+                    f"<td>{_e(o.selinux)}</td>{thp}{lim}<td>{_e(o.ntp)}</td><td>{_e(o.dns)}</td></tr>")
+    legend = ('<p class="muted">Sarı: Splunk önerisinin dışında (THP kapalı olmalı; nofile ≥ 64000, '
+              'nproc ≥ 16000, fsize unlimited). Limitler çalışan splunkd’den, çalışmıyorsa oturumdan alınır.</p>')
+    return "<h2>İşletim sistemi</h2>" + legend + _table(
+        ["Sunucu", "OS", "Kernel", "Donanım", "SELinux", "THP", "ulimit", "NTP", "DNS"], rows)
+
+
 def apps_section(r: Report) -> str:
     rows = []
     for app in r.apps:
@@ -120,6 +134,18 @@ def diffs_section(r: Report) -> str:
     return "".join(parts)
 
 
+def serverclass_section(r: Report) -> str:
+    if not r.serverclasses:
+        return ""
+    parts = ["<h2>serverclass.conf</h2>",
+             '<p class="muted">Deployment server’lardaki etkin serverclass.conf (varsayılan dışı satırlar); '
+             "her stanza’nın yanında tanımlandığı dosya.</p>"]
+    for v in r.serverclasses:
+        parts.append(f"<details><summary>{_e(v.server)} <span class=muted>({v.classes} serverclass, "
+                     f"{v.apps} app eşlemesi)</span></summary><pre>{_e(v.text)}</pre></details>")
+    return "".join(parts)
+
+
 def system_section(r: Report) -> str:
     parts = ['<h2>Sunucu ayarları (btool)</h2><p class="muted">Varsayılandan farklı ayarlar. '
              'Sarı = sunucular arasında farklı. Hücrenin üzerine gelince kaynağı görünür.</p>']
@@ -145,4 +171,4 @@ def render(r: Report) -> str:
             f"<title>Splunk raporu — {_e(r.environment)}</title><style>{CSS}</style><body>"
             f"<h1>Splunk raporu — {_e(r.environment)}</h1><p class=muted>Toplama: {_e(r.run_id)}"
             + (f" · Hariç tutulan app'ler: {_e(', '.join(r.exclude_apps))}" if r.exclude_apps else "") + "</p>"
-            + servers_section(r) + apps_section(r) + diffs_section(r) + system_section(r) + "</body></html>")
+            + servers_section(r) + os_section(r) + apps_section(r) + diffs_section(r) + serverclass_section(r) + system_section(r) + "</body></html>")

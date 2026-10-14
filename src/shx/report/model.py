@@ -20,6 +20,8 @@ SYSTEM_CONFS = ("server", "web", "outputs", "deploymentclient", "distsearch", "l
 # server settings section (conf -> fnmatch patterns). Extend here when something else is noise.
 EXCLUDED_STANZAS = {
     "server": ("lmpool:*", "introspection:*"),
+    "web": ("expose:*",),
+    "*": ("opamp_binary_edge*",),   # any conf
 }
 UNIT_LIMIT_KEYS = ("LimitNOFILE", "LimitNPROC", "LimitCORE", "LimitFSIZE", "LimitDATA", "LimitAS",
                    "MemoryLimit", "MemoryMax", "MemoryHigh", "CPUQuota", "CPUShares", "CPUWeight",
@@ -86,6 +88,71 @@ def server_rows(snaps: list[ServerSnapshot]) -> list[ServerRow]:
         rows.append(ServerRow(s.name, s.role_label, s.site or "", product, version, running,
                               service or "systemd/init.d servisi yok", ", ".join(limits) or UNSET,
                               len(s.summary.get("errors", []))))
+    return rows
+
+
+# --- operating system ---------------------------------------------------------------
+
+# Splunk's documented minimums: THP off, nofile >= 64000, nproc >= 16000, fsize unlimited.
+MIN_LIMITS = {"Max open files": 64000, "Max processes": 16000}
+SHORT_LIMITS = (("Max open files", "nofile"), ("Max processes", "nproc"), ("Max file size", "fsize"),
+                ("Max core file size", "core"), ("Max data size", "data"))
+
+
+@dataclass
+class OsRow:
+    name: str
+    os: str
+    kernel: str
+    hardware: str
+    selinux: str
+    thp: str
+    thp_off: bool
+    limits: str
+    limits_source: str
+    limits_ok: bool
+    ntp: str
+    dns: str
+
+
+def _limits_ok(limits: dict) -> bool:
+    for name, minimum in MIN_LIMITS.items():
+        soft = (limits.get(name) or {}).get("soft")
+        if soft is None or soft == "unlimited":
+            continue  # unknown is not flagged
+        if not soft.isdigit() or int(soft) < minimum:
+            return False
+    fsize = (limits.get("Max file size") or {}).get("soft")
+    return fsize in (None, "unlimited")
+
+
+def os_rows(snaps: list[ServerSnapshot]) -> list[OsRow]:
+    rows = []
+    for s in snaps:
+        o = s.summary.get("os") or {}
+        if not o:
+            rows.append(OsRow(s.name, "toplanmadı", "", "", "", "", True, "", "", True, "", ""))
+            continue
+        running = [i for i in (s.summary.get("service") or {}).get("installs", []) if i.get("process_limits")]
+        limits, source = (running[0]["process_limits"], "splunkd") if running else (o.get("session_limits") or {}, "oturum")
+        sel = o.get("selinux") or {}
+        selinux = sel.get("current", "")
+        if sel.get("config") and sel.get("config") != selinux:
+            selinux += f" (açılışta: {sel['config']})"
+        thp = o.get("thp") or {}
+        thp_text = f"enabled={thp.get('enabled')}, defrag={thp.get('defrag')}" if thp else "yok"
+        mem = o.get("memory_mb")
+        hardware = f"{o.get('cpus') or '?'} CPU, {round(mem / 1024, 1) if mem else '?'} GB"
+        dns_servers = []
+        for entry in (o.get("dns") or {}).values():
+            dns_servers += [n for n in entry.get("nameservers", []) if n not in dns_servers]
+        rows.append(OsRow(
+            s.name, o.get("os") or "?", o.get("kernel") or "?", hardware, selinux, thp_text,
+            not thp or (thp.get("enabled") == "never" and thp.get("defrag") == "never"),
+            ", ".join(f"{short}={limits[name]['soft']}" for name, short in SHORT_LIMITS if name in limits),
+            source, _limits_ok(limits),
+            ", ".join(dict.fromkeys(n["server"] for n in o.get("ntp") or [])) or "tanımlı değil",
+            ", ".join(dns_servers) or "tanımlı değil"))
     return rows
 
 
@@ -248,7 +315,8 @@ def _source(path: str) -> str:
 
 
 def excluded(conf: str, stanza: str) -> bool:
-    return any(fnmatch.fnmatchcase(stanza, p) for p in EXCLUDED_STANZAS.get(conf, ()))
+    patterns = EXCLUDED_STANZAS.get(conf, ()) + EXCLUDED_STANZAS.get("*", ())
+    return any(fnmatch.fnmatchcase(stanza, p) for p in patterns)
 
 
 def _source_app(path: str) -> str | None:
@@ -286,6 +354,36 @@ def build_system(snaps: list[ServerSnapshot], exclude=()) -> list[SystemRow]:
     return rows
 
 
+# --- deployment server serverclass.conf ---------------------------------------------
+
+@dataclass
+class ServerclassView:
+    server: str
+    text: str          # effective non-default serverclass.conf, conf form
+    classes: int
+    apps: int
+
+
+def serverclass_views(snaps: list[ServerSnapshot]) -> list[ServerclassView]:
+    views = []
+    for s in snaps:
+        conf = parse_btool((s.summary.get("btool") or {}).get("serverclass", ""))
+        lines, classes, apps = [], 0, 0
+        for stanza, kv in conf.items():
+            custom = {k: v for k, v in kv.items() if not v.is_system_default}
+            if not custom:
+                continue
+            classes += stanza.count(":") == 1 and stanza.startswith("serverClass:")
+            apps += ":app:" in stanza
+            sources = sorted({_source(v.source) for v in custom.values()})
+            lines.append(f"[{stanza}]" + (f"    # {', '.join(sources)}" if sources else ""))
+            lines += [f"{k} = {v.value}" for k, v in custom.items()]
+            lines.append("")
+        if lines:
+            views.append(ServerclassView(s.name, "\n".join(lines).rstrip(), classes, apps))
+    return views
+
+
 # --- whole report -------------------------------------------------------------------
 
 @dataclass
@@ -293,10 +391,12 @@ class Report:
     environment: str
     run_id: str
     servers: list[ServerRow]
+    os: list[OsRow]
     server_names: list[str]
     apps: list[App]
     system: list[SystemRow]
     exclude_apps: tuple[str, ...] = ()
+    serverclasses: list[ServerclassView] = field(default_factory=list)
 
 
 def build(run_dir: str | Path, env_path: str | Path | None = None) -> Report:
@@ -306,6 +406,6 @@ def build(run_dir: str | Path, env_path: str | Path | None = None) -> Report:
     if env_path:  # the current environment file wins, so exclusions apply without recollecting
         from shx.collect.environment import load as load_env
         exclude = load_env(env_path).exclude_apps
-    return Report(run.get("environment", ""), run.get("run_id", ""), server_rows(snaps),
+    return Report(run.get("environment", ""), run.get("run_id", ""), server_rows(snaps), os_rows(snaps),
                   [s.name for s in snaps], build_apps(snaps, exclude), build_system(snaps, exclude),
-                  exclude)
+                  exclude, serverclass_views(snaps))

@@ -145,3 +145,51 @@ def test_diffs_rendered_per_server_in_conf_form(tmp_path):
     assert "modtime" not in blocks and "is_configured" not in blocks and "version =" not in blocks
     assert "Bu ayarlar olmadan: hf1" in section  # hf1 has nothing for search: one line, no empty table
     assert "<table" not in section.split("Sunucu ayarları")[0]
+
+
+def test_os_rows_and_highlighting(tmp_path):
+    good_os = {"os": "RHEL 8.9", "kernel": "4.18", "cpus": 16, "memory_mb": 65536,
+               "selinux": {"current": "permissive", "config": "enforcing"},
+               "thp": {"enabled": "never", "defrag": "never"},
+               "session_limits": {"Max open files": {"soft": "1024", "hard": "4096"}},
+               "ntp": [{"server": "10.0.0.1"}, {"server": "10.0.0.1"}],
+               "dns": {"/etc/resolv.conf": {"nameservers": ["10.0.0.53"], "search": []}}}
+    bad_os = {**good_os, "thp": {"enabled": "always", "defrag": "madvise"}, "ntp": [], "dns": {}}
+    servers = {
+        "sh1": {"role": "sh", "service": SVC_ENT, "os": good_os},   # splunkd running: its limits are used
+        "hf1": {"role": "hf", "service": SVC_NONE, "os": bad_os},   # not running: session limits
+        "old": {"role": "hf", "service": SVC_NONE},                 # collected before OS info existed
+    }
+    rows = {o.name: o for o in build(make_run(tmp_path, servers)).os}
+    sh = rows["sh1"]
+    assert sh.limits_source == "splunkd" and sh.limits == "nofile=65536" and sh.limits_ok
+    assert sh.thp_off and sh.selinux == "permissive (açılışta: enforcing)"
+    assert sh.hardware == "16 CPU, 64.0 GB" and sh.ntp == "10.0.0.1" and sh.dns == "10.0.0.53"
+    hf = rows["hf1"]
+    assert hf.limits_source == "oturum" and not hf.limits_ok and not hf.thp_off
+    assert hf.ntp == "tanımlı değil" and hf.dns == "tanımlı değil"
+    assert rows["old"].os == "toplanmadı"
+    html = render(build(make_run(tmp_path, servers)))
+    assert "<h2>İşletim sistemi</h2>" in html and "<td class=hi>enabled=always, defrag=madvise</td>" in html
+
+
+def test_hidden_stanzas_and_serverclass_section(tmp_path):
+    servers = {
+        "ds1": {"role": "ds", "btool": {
+            "web": bt("etc/system/local/web.conf", "expose:tlPackage-scatterPlot", pattern="x")
+                   + bt("etc/system/local/web.conf", "settings", httpport="8000"),
+            "server": bt("etc/system/local/server.conf", "opamp_binary_edge", disabled="true"),
+            "serverclass": bt("etc/system/default/serverclass.conf", "global", restartSplunkd="false")
+                           + bt("etc/system/local/serverclass.conf", "serverClass:hf_push", **{"whitelist__0": "hf*"})
+                           + bt("etc/system/local/serverclass.conf", "serverClass:hf_push:app:TA-syslog",
+                                restartSplunkd="true")}},
+        "sh1": {"role": "sh"},
+    }
+    r = build(make_run(tmp_path, servers))
+    stanzas = {x.stanza for x in r.system}
+    assert stanzas == {"settings"}  # expose:* and opamp_binary_edge hidden; serverclass not in this table
+    [v] = r.serverclasses
+    assert (v.server, v.classes, v.apps) == ("ds1", 1, 1)
+    assert "[serverClass:hf_push]    # system/local\nwhitelist.0 = hf*" in v.text
+    assert "restartSplunkd = true" in v.text and "[global]" not in v.text  # stock default left out
+    assert "<h2>serverclass.conf</h2>" in render(r)

@@ -32,7 +32,7 @@ def make_run(tmp: Path, servers: dict, env="test", exclude_apps=()) -> Path:
     run = {"environment": env, "run_id": "r1", "servers": {}, "exclude_apps": list(exclude_apps)}
     for name, spec in servers.items():
         summary = {"hostname": name, "apps": spec.get("apps", []), "btool": spec.get("btool", {}),
-                   "service": spec.get("service", {}), "errors": spec.get("errors", [])}
+                   "service": spec.get("service", {}), "os": spec.get("os", {}), "errors": spec.get("errors", [])}
         (tmp / f"{name}.summary.json").write_text(json.dumps(summary))
         entry = {"ok": True, "summary": f"{name}.summary.json", "role": spec["role"], "site": spec.get("site"),
                  "ha_group": spec.get("ha"), "host": spec.get("host", name),

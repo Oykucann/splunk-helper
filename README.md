@@ -4,6 +4,9 @@ Reads Splunk servers over SSH, **read-only**, and produces one simple HTML repor
 
 - **Servers and Splunk service**: whether Splunk is installed, Enterprise or Universal
   Forwarder, version, running or not, systemd/init.d service, and service and process limits.
+- **Operating system**: OS and kernel, CPU/RAM, SELinux (current and at boot), THP, effective
+  ulimits (from the running splunkd), NTP servers and DNS resolvers; values outside Splunk's
+  recommendations are highlighted.
 - **Apps**: every app on every server, its version, and whether the copies are identical.
 - **App differences**: for apps whose copies differ, which conf/stanza/key (or file) differs,
   with each server's value and a short note.
@@ -11,6 +14,8 @@ Reads Splunk servers over SSH, **read-only**, and produces one simple HTML repor
 - **Server settings (btool)**: non-default settings in server, web, outputs, deploymentclient,
   distsearch, limits, authentication, authorize, health and alert_actions, with differing rows
   highlighted.
+- **serverclass.conf**: the effective deployment server classes (non-default lines), with the
+  file each stanza comes from.
 
 ## No files are copied, nothing is left on the servers
 
